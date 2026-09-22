@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import httpx
 from dateutil.parser import isoparse
-from ..config import settings
+from ..config import get_youtube_api_key
 
 API = "https://www.googleapis.com/youtube/v3"
 CHANNEL_RE = re.compile(r"youtube\.com/channel/([\w-]+)", re.I)
@@ -33,7 +33,7 @@ def parse_channel_url(url: str) -> tuple[str, str]:
 
 
 class YouTubeDataClient:
-    def __init__(self, key: str | None = None): self.key = key if key is not None else settings.youtube_api_key
+    def __init__(self, key: str | None = None): self.key = key if key is not None else get_youtube_api_key()
 
     def _get(self, resource: str, params: dict) -> dict:
         if not self.key: raise YouTubeError("Chưa cấu hình YOUTUBE_API_KEY")

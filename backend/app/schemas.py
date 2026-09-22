@@ -7,6 +7,10 @@ class ChannelCreate(BaseModel):
     url: str = Field(min_length=10, max_length=1024)
 
 
+class YouTubeApiKeyUpdate(BaseModel):
+    api_key: str = Field(min_length=10, max_length=256)
+
+
 class ChannelSettingsUpdate(BaseModel):
     preferred_languages: list[str] = ["vi", "en", "original"]
     subtitle_preference: str = Field(default="any", pattern="^(manual|auto|any)$")

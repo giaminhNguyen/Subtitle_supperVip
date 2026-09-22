@@ -3,10 +3,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
-from .config import settings
+from .config import set_youtube_api_key, settings, youtube_api_key_configured
 from .database import get_db
 from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Video, VideoStatus
-from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut
+from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut, YouTubeApiKeyUpdate
 from .services.jobs import enqueue
 from .services.youtube import YouTubeDataClient, YouTubeError
 from .services.subtitles import BlockedByYouTube, SubtitleUnavailable, available_transcripts
@@ -29,6 +29,20 @@ def video_or_404(db: Session, video_id: str) -> Video:
 
 @app.get("/health")
 def health(): return {"ok": True}
+
+
+@app.get("/api/config/youtube")
+def youtube_config():
+    return {"configured": youtube_api_key_configured()}
+
+
+@app.put("/api/config/youtube")
+def update_youtube_config(body: YouTubeApiKeyUpdate):
+    try:
+        set_youtube_api_key(body.api_key)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return {"configured": True}
 
 
 @app.get("/api/dashboard")

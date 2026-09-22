@@ -1,315 +1,108 @@
 # YouTube Subtitle Manager
 
-Ứng dụng web quản lý subtitle hàng loạt từ nhiều kênh YouTube. Dán URL kênh, quét toàn bộ video công khai, tải caption theo hàng đợi bền vững, theo dõi chi tiết trạng thái và lưu subtitle có tổ chức trên máy.
+Ứng dụng quản lý subtitle hàng loạt từ các kênh YouTube. Dán URL kênh, quét video công khai, đưa việc tải caption vào hàng đợi và lưu subtitle có tổ chức trên máy.
 
-> Caption được lấy bằng [`youtube-transcript-api`](https://github.com/jdepoix/youtube-transcript-api). Ứng dụng không dùng Selenium, ChromeDriver hay trình duyệt headless để tải subtitle.
+## Chạy nhanh trên Windows
 
-## Mục lục
+Yêu cầu duy nhất cần cài trước:
 
-- [Tính năng](#tính-năng)
-- [Kiến trúc](#kiến-trúc)
-- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
-- [Cài đặt bằng Docker](#cài-đặt-bằng-docker)
-- [Chạy local trên Windows](#chạy-local-trên-windows)
-- [Tạo YouTube API key](#tạo-youtube-api-key)
-- [Cách sử dụng](#cách-sử-dụng)
-- [Lưu trữ subtitle](#lưu-trữ-subtitle)
-- [Trạng thái xử lý](#trạng-thái-xử-lý)
-- [REST API](#rest-api)
-- [Kiểm thử](#kiểm-thử)
-- [Xử lý lỗi thường gặp](#xử-lý-lỗi-thường-gặp)
-- [Giới hạn](#giới-hạn)
+- Python 3.12 trở lên, chọn **Add Python to PATH** khi cài.
+- Node.js 22 trở lên.
 
-## Tính năng
-
-- Thêm nhiều kênh từ `@handle`, `/channel/CHANNEL_ID`, `/user/...` và custom URL.
-- Quét bằng **Uploads Playlist** của YouTube Data API v3 để vượt giới hạn 500 kết quả của `search.list`.
-- Lưu metadata, nhận diện video thường / Short / live đã lưu và tránh tạo video trùng.
-- Cấu hình từng kênh: ưu tiên ngôn ngữ (ví dụ `vi → en → original`), sub thủ công/tự động/bất kỳ, dùng dịch YouTube, định dạng xuất.
-- Xuất `SRT`, `VTT`, `TXT`, `JSON`, `CSV` và `metadata.json`.
-- Hàng đợi SQLite bền vững: pause, resume, cancel, retry, exponential backoff và khôi phục job sau restart.
-- Đồng bộ video mới theo lịch riêng từng kênh.
-- Dashboard, danh sách video theo trạng thái, cấu hình kênh, jobs và logs.
-
-## Kiến trúc
+Sau khi clone hoặc giải nén dự án, chỉ cần bấm đúp:
 
 ```text
-┌──────────────────────┐        REST API        ┌────────────────────────┐
-│ React + TypeScript   │ ──────────────────────► │ FastAPI                │
-│ Vite admin UI        │ ◄────────────────────── │ SQLAlchemy + SQLite    │
-└──────────────────────┘                         └───────────┬────────────┘
-                                                              │
-                         ┌────────────────────────────────────┼───────────────────────────┐
-                         ▼                                    ▼                           ▼
-                YouTube Data API v3                   Persistent worker              data/ files
-                channel + uploads playlist             scan / download / retry       subtitle + metadata
+start-app.bat
 ```
 
-| Thành phần | Vai trò |
-| --- | --- |
-| `backend/app/main.py` | FastAPI REST API và validation |
-| `backend/app/worker.py` | Worker queue riêng, retry và recovery |
-| `backend/app/services/youtube.py` | Resolve URL và quét Uploads Playlist |
-| `backend/app/services/subtitles.py` | Chọn track, lấy transcript, export file |
-| `backend/alembic/` | Database migrations |
-| `frontend/` | React + TypeScript + Vite admin UI |
+Launcher tự động tạo Python virtual environment, cài dependency còn thiếu, tạo/cập nhật SQLite, khởi động API, worker và web ở nền, rồi mở <http://localhost:5173>.
 
-## Yêu cầu hệ thống
+Để dừng ứng dụng, bấm:
 
-Chọn một cách chạy:
+```text
+stop-app.bat
+```
 
-| Cách chạy | Cần cài |
-| --- | --- |
-| Docker | Docker Desktop 4+ (Docker Compose) |
-| Local Windows | Python **3.12+**, Node.js **22+**, npm |
+## Cấu hình YouTube API key
 
-Bạn cũng cần API key của **YouTube Data API v3**. Không cần Selenium hay browser automation.
+1. Mở <https://console.cloud.google.com/> và chọn hoặc tạo project.
+2. Vào **APIs & Services → Library**, tìm và bật **YouTube Data API v3**.
+3. Vào **APIs & Services → Credentials → Create Credentials → API key**.
+4. Sau khi chạy ứng dụng, dán key vào phần **Cấu hình YouTube API key** trên trang chủ.
 
-## Cài đặt bằng Docker
+Key được lưu cục bộ trong `.env`; ứng dụng không trả key về web sau khi đã lưu. `.env` đã được bỏ qua bởi Git.
 
-### 1. Cấu hình môi trường
+Hoặc nhập key qua terminal mà không hiện ký tự đã gõ:
 
 ```powershell
-cd E:\OTHER\Subtitle_supperVip
-Copy-Item .env.example .env
-notepad .env
+cd backend
+.\.venv\Scripts\python.exe -m app.cli set-youtube-api-key
 ```
 
-Thay giá trị sau bằng API key thật:
+Không truyền key trực tiếp trên command line vì có thể bị lưu vào lịch sử terminal.
+
+## Sử dụng
+
+1. Mở <http://localhost:5173>.
+2. Dán URL kênh, ví dụ `https://www.youtube.com/@phuthuyaudioso`.
+3. Chọn kênh vừa thêm và bấm **Quét toàn bộ**.
+4. Worker tải subtitle theo cấu hình ngôn ngữ/định dạng của kênh.
+5. Theo dõi tiến trình tại **Jobs & logs**.
+
+Ứng dụng nhận các dạng URL `@handle`, `/channel/ID`, `/user/...` và custom URL. Chỉ video công khai được YouTube Data API trả về mới được quét.
+
+## Cấu trúc dữ liệu portable
+
+Mọi dữ liệu runtime đều nằm trong thư mục dự án, vì vậy có thể di chuyển hoặc clone dự án đến vị trí khác:
+
+```text
+.env                 # API key và cấu hình local, không commit
+data/                # SQLite database, subtitle và metadata
+.runtime/logs/       # Log của launcher
+backend/.venv/       # Python environment có thể tái tạo
+frontend/node_modules/ # Node dependency có thể tái tạo
+```
+
+`DATABASE_URL` trong `.env` giữ ở dạng portable:
 
 ```env
-YOUTUBE_API_KEY=YOUR_GOOGLE_YOUTUBE_DATA_API_KEY
+DATABASE_URL=sqlite:///./data/app.db
 ```
 
-### 2. Khởi động
+Không đặt đường dẫn tuyệt đối như `E:\...` trong cấu hình. Launcher tự tạo các thư mục cần thiết. Nếu `.venv` bị hỏng do đã di chuyển dự án, launcher sẽ tự tạo lại nó.
+
+## Xử lý lỗi
+
+| Vấn đề | Cách xử lý |
+| --- | --- |
+| Không tìm thấy `py`, `node` hoặc `npm` | Cài Python 3.12+ hoặc Node.js 22+, rồi chạy lại `start-app.bat`. |
+| Không mở được trang web | Xem `.runtime\logs\api.err.log` và `.runtime\logs\web.err.log`. |
+| Quét/tải không chạy | Bảo đảm `start-app.bat` đã chạy; worker ghi log tại `.runtime\logs\worker.err.log`. |
+| `blocked` | YouTube có thể giới hạn IP. Giảm `REQUESTS_PER_MINUTE`, chờ rồi thử lại. |
+| Không có subtitle | Video có thể không có caption, bị private/removed/age-restricted hoặc tác giả tắt transcript. |
+
+## Chạy thủ công cho phát triển
+
+Mở ba terminal riêng:
 
 ```powershell
-docker compose up --build
-```
-
-Khi hoàn tất, mở:
-
-- UI: <http://localhost:5173>
-- Swagger API docs: <http://localhost:8000/docs>
-- Health check: <http://localhost:8000/health>
-
-Chạy nền:
-
-```powershell
-docker compose up -d --build
-```
-
-Theo dõi worker:
-
-```powershell
-docker compose logs -f worker
-```
-
-## Chạy local trên Windows
-
-Mở ba cửa sổ PowerShell.
-
-### 1. Tạo `.env`
-
-```powershell
-cd E:\OTHER\Subtitle_supperVip
-Copy-Item .env.example .env
-notepad .env
-```
-
-Điền `YOUTUBE_API_KEY`, lưu file.
-
-### 2. Chạy backend API
-
-```powershell
-cd E:\OTHER\Subtitle_supperVip\backend
-
-py -3.12 -m venv .venv
+# Terminal 1 — API
+cd backend
 .\.venv\Scripts\Activate.ps1
-
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-alembic upgrade head
-
 uvicorn app.main:app --reload --port 8000
-```
 
-Nếu PowerShell chặn `Activate.ps1`, áp dụng cho cửa sổ hiện tại rồi chạy lại lệnh activate:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-### 3. Chạy worker
-
-```powershell
-cd E:\OTHER\Subtitle_supperVip\backend
+# Terminal 2 — Worker
+cd backend
 .\.venv\Scripts\Activate.ps1
 python -m app.worker
-```
 
-> API chỉ tạo job. Worker là tiến trình thực thi quét/tải subtitle, vì vậy cần giữ cửa sổ này chạy.
-
-### 4. Chạy frontend
-
-```powershell
-cd E:\OTHER\Subtitle_supperVip\frontend
-npm install
+# Terminal 3 — Web
+cd frontend
 npm run dev
 ```
 
-Mở <http://localhost:5173>.
+## Ghi chú
 
-## Tạo YouTube API key
-
-1. Vào [Google Cloud Console](https://console.cloud.google.com/), tạo hoặc chọn Project.
-2. Vào **APIs & Services → Library** và bật **YouTube Data API v3**.
-3. Vào **APIs & Services → Credentials → Create credentials → API key**.
-4. Dán API key vào `YOUTUBE_API_KEY` trong `.env`.
-5. Khuyến nghị giới hạn API key theo API/app trong Google Cloud Console trước khi dùng thực tế.
-
-Không commit `.env`, API key, cookie hoặc proxy credential. `.gitignore` đã bỏ qua `.env` và dữ liệu sinh ra.
-
-## Cách sử dụng
-
-1. Mở dashboard, dán URL một kênh YouTube rồi bấm **Thêm kênh**.
-2. Vào chi tiết kênh, cấu hình ngôn ngữ, loại subtitle, dịch tự động, format xuất và chu kỳ đồng bộ.
-3. Chọn một thao tác:
-   - **Quét toàn bộ**: đọc toàn bộ Uploads Playlist, chỉ tải video chưa hoàn tất.
-   - **Đồng bộ video mới**: chỉ thêm video mới/chưa xử lý.
-   - **Xử lý lỗi / thiếu sub**: đưa video lỗi hoặc thiếu subtitle vào queue lại.
-4. Xem tiến độ ở bảng video hoặc **Jobs & logs**.
-5. File hoàn tất nằm trong `data/`.
-
-## Lưu trữ subtitle
-
-```text
-data/
-└── ten-kenh/
-    └── 2026-09-ten-video-video_id/
-        ├── vi.srt
-        ├── vi.txt
-        ├── vi.json
-        └── metadata.json
-```
-
-Tên file được làm sạch để tương thích Windows, macOS và Linux. `metadata.json` gồm metadata video, track subtitle đã chọn, nguồn manual/auto, thông tin dịch và danh sách file xuất.
-
-## Trạng thái xử lý
-
-| Trạng thái | Ý nghĩa |
-| --- | --- |
-| `pending` | Chưa đưa vào xử lý |
-| `queued` | Đang chờ worker |
-| `processing` | Worker đang xử lý |
-| `completed` | Xuất subtitle thành công |
-| `no_subtitle` | Không có transcript/caption |
-| `language_unavailable` | Có sub nhưng không có ngôn ngữ phù hợp |
-| `failed` | Hết retry hoặc lỗi không khôi phục được |
-| `blocked` | YouTube rate-limit/chặn IP |
-| `skipped` | Người dùng bỏ qua |
-
-Lỗi mạng tạm thời sẽ retry theo exponential backoff. Job `processing` khi ứng dụng dừng sẽ được đưa trở lại queue khi worker khởi động lần sau.
-
-## REST API
-
-Mở Swagger UI tại <http://localhost:8000/docs>.
-
-| Method | Endpoint | Mục đích |
-| --- | --- | --- |
-| `POST` | `/api/channels` | Thêm kênh bằng URL |
-| `GET` | `/api/channels` | Danh sách kênh |
-| `PUT` | `/api/channels/{id}/settings` | Lưu cấu hình subtitle/lịch sync |
-| `POST` | `/api/channels/{id}/scan` | Queue scan `all`, `new`, `since`, `retryable` |
-| `POST` | `/api/channels/{id}/sync` | Đồng bộ video mới |
-| `GET` | `/api/channels/{id}/videos` | Video có filter status/title/language |
-| `GET` | `/api/videos/{id}/available-subtitles` | Kiểm tra tracks hiện có |
-| `POST` | `/api/videos/{id}/download?force=true` | Tải lại subtitle video |
-| `GET` | `/api/jobs`, `/api/logs` | Queue và nhật ký |
-| `POST` | `/api/jobs/{id}/pause`, `/resume`, `/cancel`, `/retry` | Điều khiển job |
-
-Ví dụ thêm kênh bằng PowerShell:
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8000/api/channels `
-  -ContentType 'application/json' `
-  -Body '{"url":"https://www.youtube.com/@GoogleDevelopers"}'
-```
-
-## Kiểm thử
-
-Sau khi cài backend dependencies:
-
-```powershell
-cd E:\OTHER\Subtitle_supperVip\backend
-.\.venv\Scripts\Activate.ps1
-pytest -q
-```
-
-Test bao phủ parse URL, chống trùng video/job, chọn subtitle, serializer SRT và retry/backoff.
-
-Build frontend:
-
-```powershell
-cd E:\OTHER\Subtitle_supperVip\frontend
-npm run build
-```
-
-## Xử lý lỗi thường gặp
-
-### Không tìm thấy `py`/Python
-
-Cài Python 3.12+ từ [python.org](https://www.python.org/downloads/) và chọn **Add Python to PATH**. Mở PowerShell mới rồi kiểm tra:
-
-```powershell
-py -3.12 --version
-```
-
-### `YOUTUBE_API_KEY` chưa cấu hình
-
-Đảm bảo `.env` nằm ở thư mục gốc dự án, không phải trong `backend/`:
-
-```powershell
-Get-Content E:\OTHER\Subtitle_supperVip\.env
-```
-
-### API trả quota exceeded / 403
-
-Kiểm tra API đã bật, key thuộc đúng Google Cloud Project và còn quota. Kênh lớn dùng quota đáng kể vì ứng dụng lấy video details theo từng trang playlist.
-
-### `no_subtitle`
-
-Video có thể không có caption, bị xóa/private, giới hạn tuổi, hoặc tác giả đã tắt transcript. Đây không nhất thiết là lỗi ứng dụng.
-
-### `blocked`
-
-YouTube có thể rate-limit/chặn IP khi tải dồn dập. Giảm `REQUESTS_PER_MINUTE`, chờ rồi retry. Không tăng concurrency một cách thiếu kiểm soát.
-
-### Không thấy file subtitle
-
-Đảm bảo worker còn chạy: local dùng cửa sổ `python -m app.worker`; Docker dùng `docker compose logs -f worker`. Xem chi tiết trong Jobs & logs.
-
-## Giới hạn
-
-- Chỉ quét video công khai mà YouTube Data API trả về.
-- Không thể đảm bảo transcript cho private/removed/age-restricted video hoặc video không có caption.
-- YouTube không đảm bảo endpoint transcript công khai ổn định; hãy giữ tốc độ request thấp.
-- YouTube API key chỉ dùng cho metadata/danh sách video; transcript lấy qua `youtube-transcript-api`.
-- SQLite phù hợp MVP/một worker. Hệ thống nhiều worker/người dùng nên chuyển `DATABASE_URL` sang PostgreSQL và dùng queue broker chuyên dụng.
-
-## Biến môi trường
-
-| Biến | Mặc định | Mô tả |
-| --- | --- | --- |
-| `YOUTUBE_API_KEY` | — | Bắt buộc để resolve/quét kênh |
-| `DATABASE_URL` | `sqlite:///./data/app.db` | SQLAlchemy database URL |
-| `DATA_DIR` | `./data` | Nơi lưu subtitle và metadata |
-| `REQUESTS_PER_MINUTE` | `20` | Tốc độ request tối đa khuyến nghị |
-| `WORKER_POLL_SECONDS` | `2` | Chu kỳ kiểm tra queue của worker |
-| `CORS_ORIGINS` | `http://localhost:5173` | Origin frontend được phép gọi API |
-| `VITE_API_BASE_URL` | `http://localhost:8000/api` | API URL phía frontend |
-
----
-
-Toàn bộ subtitle được lưu tại máy của bạn trong `data/`.
+- YouTube Data API v3 cấp quota miễn phí mặc định; quota không phải phí tự động.
+- API key chỉ dùng để lấy metadata/danh sách video. Caption được lấy bằng `youtube-transcript-api`.
+- Không commit `.env`, API key, cookie hoặc credential proxy.
