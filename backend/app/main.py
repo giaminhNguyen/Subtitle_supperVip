@@ -1,13 +1,15 @@
 from datetime import datetime
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from .config import settings
-from .database import get_db
+from .database import SessionLocal, get_db
 from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Video, VideoStatus
 from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut, YouTubeApiKeyUpdate
 from .services.jobs import enqueue
+from .services.health import diagnostics, health_summary
 from .services.syncruns import refresh_sync_run_state
 from .services.runtime_settings import set_youtube_api_key, youtube_api_key_configured
 from .services.youtube import YouTubeDataClient, YouTubeError
@@ -30,7 +32,18 @@ def video_or_404(db: Session, video_id: str) -> Video:
 
 
 @app.get("/health")
-def health(): return {"ok": True}
+def health():
+    """Lightweight liveness/readiness: 200 unless the database or storage is failing (503)."""
+    db = SessionLocal()
+    try: body, code = health_summary(db)
+    except Exception: body, code = {"ok": False, "status": "critical", "api": "ok", "database": "error"}, 503
+    finally: db.close()
+    return JSONResponse(body, status_code=code)
+
+
+@app.get("/api/diagnostics")
+def get_diagnostics(db: Session = Depends(get_db)):
+    return diagnostics(db)
 
 
 @app.get("/api/config/youtube")

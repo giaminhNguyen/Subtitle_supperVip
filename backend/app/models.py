@@ -135,6 +135,18 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 
+class WorkerHeartbeat(Base):
+    """One row per worker process; refreshed by that worker's heartbeat thread. Stale rows = dead workers."""
+    __tablename__ = "worker_heartbeats"
+    worker_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(255), default="")
+    pid: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
+    state: Mapped[str] = mapped_column(String(16), default="idle")  # idle | busy
+    current_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # informational, deliberately not an FK
+
+
 class JobLog(Base):
     __tablename__ = "job_logs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     max_job_attempts: int = 5
     request_max_attempts: int = 4  # 1 try + 3 retries for transient external errors
+    # Worker liveness (independent of per-job leases): a worker is "running" while its last heartbeat is younger than stale.
+    worker_heartbeat_seconds: float = 10
+    worker_stale_seconds: float = 45
+    worker_record_retention_days: int = 7
+    db_backup_dir: Path = Path(".runtime/backups")
+    db_backup_keep_count: int = 10
+    runtime_log_retention_days: int = 14
+    job_history_retention_days: int = 30  # terminal jobs / sync runs older than this are deleted
+    job_log_retention_days: int = 14
+    maintenance_interval_hours: float = 6
+    scan_failure_retry_minutes: int = 30  # a scheduled channel whose scan failed for good waits this long before the next auto scan
     sync_safety_window: int = 20  # known videos required after the cursor before an incremental scan may stop
     request_timeout_seconds: float = 30  # per-operation timeout for every outbound HTTP call
     job_lease_seconds: int = 300  # a worker that stops heartbeating loses its job after this
@@ -30,6 +41,10 @@ class Settings(BaseSettings):
         # (e.g. SQLite busy_timeout of 5s) without another worker reclaiming a live job.
         if self.job_lease_seconds < 30: raise ValueError("JOB_LEASE_SECONDS phải >= 30")
         if self.job_max_runtime_seconds <= self.job_lease_seconds: raise ValueError("JOB_MAX_RUNTIME_SECONDS phải lớn hơn JOB_LEASE_SECONDS")
+        if self.worker_heartbeat_seconds <= 0 or self.worker_stale_seconds < 2 * self.worker_heartbeat_seconds:
+            raise ValueError("WORKER_STALE_SECONDS phải >= 2 x WORKER_HEARTBEAT_SECONDS (chịu được một nhịp bị trượt)")
+        if min(self.db_backup_keep_count, self.runtime_log_retention_days, self.job_history_retention_days, self.job_log_retention_days, self.worker_record_retention_days, self.scan_failure_retry_minutes) < 1 or self.maintenance_interval_hours <= 0:
+            raise ValueError("Các cấu hình retention/backup phải là số dương")
         if self.sync_safety_window < 1: raise ValueError("SYNC_SAFETY_WINDOW phải >= 1")
         if self.request_timeout_seconds <= 0 or self.request_max_attempts < 1: raise ValueError("REQUEST_TIMEOUT_SECONDS/REQUEST_MAX_ATTEMPTS không hợp lệ")
         return self
@@ -55,6 +70,8 @@ def _normalise_database_url(value: str) -> str:
 # Paths in .env may stay portable (for example ./data/app.db).  Convert them only
 # after the project root is known, never to a machine-specific path in .env.
 settings.data_dir = _project_path(settings.data_dir)
+settings.db_backup_dir = _project_path(settings.db_backup_dir)
+RUNTIME_LOG_DIR = PROJECT_ROOT / ".runtime" / "logs"
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 settings.database_url = _normalise_database_url(settings.database_url)
 

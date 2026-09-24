@@ -61,9 +61,17 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules')) -or -not (Test-Path $p
     Push-Location $frontend; npm install; Assert-LastExit 'Cai frontend dependencies'; Pop-Location
     Set-Content -Path $packageStamp -Value $packageHash -NoNewline
 }
-Push-Location $backend; & $venvPython -m alembic upgrade head; Assert-LastExit 'Cap nhat database'; Pop-Location
 
+# 1) Stop what a previous run left behind, so nothing is using the database while it is backed up/migrated.
 if (Test-Path $pidFile) { & (Join-Path $PSScriptRoot 'stop-app.ps1'); Start-Sleep -Seconds 1 }
+Push-Location $backend
+# 2) Keep last run's logs as timestamped archives and drop the old ones (never touches a log in use).
+& $venvPython -m app.dbtools rotate-logs | Out-Null
+# 3) Back up the existing database, but only when a migration is pending. If the backup fails we stop here and do NOT migrate.
+& $venvPython -m app.dbtools pre-migrate; Assert-LastExit 'Backup database truoc khi cap nhat (chua migrate, du lieu duoc giu nguyen)'
+# 4) Migrate. On failure the backup in .runtime\backups is kept; use restore-db.bat to go back.
+& $venvPython -m alembic upgrade head; Assert-LastExit 'Cap nhat database (backup nam trong .runtime\backups, dung restore-db.bat de khoi phuc)'
+Pop-Location
 $processes = @()
 if (-not (Test-ListeningPort 8000)) { $processes += Start-AppProcess 'api' $venvPython @('-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000') $backend }
 if (-not (Test-ListeningPort 5173)) {

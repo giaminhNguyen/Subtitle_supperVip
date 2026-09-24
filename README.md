@@ -58,6 +58,17 @@ Không truyền key trực tiếp trên command line vì có thể bị lưu và
 - `uploads_playlist_id` được lưu sau lần resolve đầu tiên; nếu YouTube báo playlist không còn tồn tại, ứng dụng resolve lại đúng một lần.
 - Mỗi lần đồng bộ là một *SyncRun* gồm job quét và mọi job tải do nó tạo ra. Run chỉ kết thúc (`completed`/`partial`/`failed`) khi tất cả job con đã ở trạng thái cuối; số liệu luôn được tính lại từ trạng thái job nên retry/khởi động lại không làm đếm trùng.
 
+## Sức khỏe, backup và khôi phục
+
+- `GET /health` (nhẹ, không gọi YouTube): `status` là `ok`, `degraded` (worker offline/chưa chạy hoặc chưa có API key; vẫn HTTP 200) hoặc `critical` (database/thư mục dữ liệu lỗi; HTTP 503). Worker ghi heartbeat vào SQLite mỗi `WORKER_HEARTBEAT_SECONDS` (10s); quá `WORKER_STALE_SECONDS` (45s) là offline. Worker treo không ghi heartbeat nên cũng bị coi là offline.
+- `GET /api/diagnostics`: phiên bản, revision Alembic, journal mode, kích thước DB, số job theo trạng thái, worker, SyncRun đang chạy, dung lượng ổ đĩa và lần sync thành công gần nhất. Không trả API key hay đường dẫn tuyệt đối.
+- **Backup tự động**: `start-app.bat` dừng tiến trình cũ, rồi nếu có migration sắp chạy thì sao lưu database vào `.runtime\backups\subtitle-db-YYYYMMDD-HHMMSS.sqlite3` (bằng SQLite backup API, an toàn cả khi DB đang mở) **trước** khi migrate. Backup lỗi thì không migrate. Giữ `DB_BACKUP_KEEP_COUNT` (10) bản gần nhất. Trong Docker, backup nằm ở `data/backups`.
+- **Khôi phục**: dừng ứng dụng (`stop-app.bat`), chạy `restore-db.bat`, chọn bản backup. Bản được kiểm tra trước, database hiện tại được lưu thành `subtitle-db-prerestore-*` rồi mới thay thế; backup đã chọn không bị xóa. Sau đó chạy lại `start-app.bat`.
+- **Log runtime** `.runtime\logs`: log của lần chạy trước được lưu lại kèm timestamp và xóa sau `RUNTIME_LOG_RETENTION_DAYS` (14) ngày.
+- **Dọn lịch sử DB** (worker chạy lúc khởi động rồi mỗi `MAINTENANCE_INTERVAL_HOURS`=6 giờ): xóa job/SyncRun đã kết thúc cũ hơn `JOB_HISTORY_RETENTION_DAYS` (30), log job cũ hơn `JOB_LOG_RETENTION_DAYS` (14) và bản ghi heartbeat chết quá 7 ngày. Không đụng tới channel/video/subtitle hay job đang hoạt động.
+- Scan tự động thất bại hẳn sẽ được hoãn `SCAN_FAILURE_RETRY_MINUTES` (30) phút thay vì xếp lại ngay.
+- **Worker offline?** Xem `/health`; kiểm tra `.runtime\logs\worker.err.log` và chạy lại `start-app.bat`.
+
 ## Cấu trúc dữ liệu portable
 
 Mọi dữ liệu runtime đều nằm trong thư mục dự án, vì vậy có thể di chuyển hoặc clone dự án đến vị trí khác:

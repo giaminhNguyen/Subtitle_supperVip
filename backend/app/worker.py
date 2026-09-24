@@ -14,6 +14,8 @@ from .services.jobs import ScanResult, apply_scan_result, due_channel_syncs, sca
 from .services.syncruns import refresh_sync_run_state
 from .services.queue import Heartbeat, LostOwnership, claim_next_job, guard_job, new_worker_id, recover_stale_jobs
 from .services.storage import atomic_write_text, to_stored_path
+from .services.maintenance import MaintenanceSchedule, run_retention
+from .services.workers import STATE, HeartbeatThread
 from .services.subtitles import BlockedByYouTube, LanguageUnavailable, SubtitleUnavailable, fetch_selected, serialize, video_folder
 
 WORKER_ID = new_worker_id()
@@ -62,17 +64,19 @@ def process_one() -> bool:
         due_channel_syncs(db); db.commit()
         job = claim_next_job(db, WORKER_ID, settings.job_lease_seconds)
         if not job: return False
+        STATE.busy(job.id)
         with Heartbeat(SessionLocal, job.id, WORKER_ID, settings.job_lease_seconds, settings.job_max_runtime_seconds):
             try: _run_job(db, job)
             except LostOwnership:
                 db.rollback(); logger.warning("Job %s đã bị worker khác tiếp quản; bỏ toàn bộ kết quả", job.id)
         return True
-    finally: db.close()
+    finally:
+        STATE.idle(); db.close()
 
 
 def _run_job(db, job: Job):
     """Raises LostOwnership when this claim is no longer the owner at any guarded write."""
-    job_id, attempts, max_attempts, video_id = job.id, job.attempts, job.max_attempts, job.video_id  # snapshot: rollbacks expire ORM state
+    job_id, attempts, max_attempts, video_id, channel_id = job.id, job.attempts, job.max_attempts, job.video_id, job.channel_id  # snapshot: rollbacks expire ORM state
     run_id = job.sync_run_id
     now = datetime.utcnow
     def guard(**values): guard_job(db, job_id, WORKER_ID, attempts, **values)
@@ -132,13 +136,29 @@ def _run_job(db, job: Job):
                 v = video_row()
                 if v: v.retry_count, v.last_error, v.last_processed_at, v.status = v.retry_count + 1, error, now(), VideoStatus.failed
                 log_job(f"Thất bại: {error}", "error")
+                if job.kind == "scan":  # a scheduled channel must not be re-enqueued immediately after a permanent scan failure
+                    channel = db.get(Channel, channel_id)
+                    if channel and channel.next_sync_at is not None:
+                        channel.next_sync_at = max(channel.next_sync_at, now() + timedelta(minutes=settings.scan_failure_retry_minutes))
             finalize(apply, status=JobStatus.failed, finished_at=now(), error=error, outcome="failed" if job.kind == "download" else None)
 
 
-def worker_loop(process=process_one, sleep=time.sleep, poll_seconds: float | None = None, should_stop=lambda: False):
-    """Drain the queue back-to-back; sleep only when there is nothing to do (or after an error)."""
+def run_maintenance():
+    with SessionLocal() as db: return run_retention(db)
+
+
+def worker_loop(process=process_one, sleep=time.sleep, poll_seconds: float | None = None, should_stop=lambda: False, maintenance=None, schedule=None):
+    """Drain the queue back-to-back; sleep only when there is nothing to do (or after an error).
+    `maintenance` (retention) runs at startup and then every MAINTENANCE_INTERVAL_HOURS, never per poll."""
     poll = settings.worker_poll_seconds if poll_seconds is None else poll_seconds
+    schedule = schedule or MaintenanceSchedule()
     while not should_stop():
+        STATE.tick()
+        if maintenance and schedule.due():
+            STATE.busy("maintenance")
+            try: maintenance()
+            except Exception: logger.exception("Maintenance lỗi")
+            finally: schedule.done(); STATE.idle()
         try: worked = process()
         except Exception:
             logger.exception("Worker gặp lỗi không mong đợi"); worked = False
@@ -147,5 +167,10 @@ def worker_loop(process=process_one, sleep=time.sleep, poll_seconds: float | Non
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    with SessionLocal() as startup_db: recover_stale_jobs(startup_db)
-    worker_loop()
+    logger.info("Worker %s khởi động", WORKER_ID)
+    heartbeat = HeartbeatThread(SessionLocal, WORKER_ID).start()
+    try:
+        with SessionLocal() as startup_db: recover_stale_jobs(startup_db)
+        worker_loop(maintenance=run_maintenance)
+    finally:
+        heartbeat.stop()
