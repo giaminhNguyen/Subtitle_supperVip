@@ -3,11 +3,18 @@ from io import StringIO
 from pathlib import Path
 from youtube_transcript_api import YouTubeTranscriptApi
 from ..config import settings
+from .ratelimit import call_with_retry
 
 
 class SubtitleUnavailable(Exception): pass
 class LanguageUnavailable(Exception): pass
 class BlockedByYouTube(Exception): pass
+
+
+def _transcript_retryable(exc: Exception) -> tuple[bool, float | None]:
+    """Only plain network trouble is retried in-process; IP blocks/429 are left to job-level backoff."""
+    import requests
+    return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError)), None
 
 
 def choose_transcript(transcripts, languages: list[str], preference: str, allow_translation: bool):
@@ -31,8 +38,8 @@ def choose_transcript(transcripts, languages: list[str], preference: str, allow_
 def fetch_selected(video_id: str, languages: list[str], preference: str, allow_translation: bool):
     try:
         api = YouTubeTranscriptApi()
-        transcript, translated = choose_transcript(api.list(video_id), languages, preference, allow_translation)
-        fetched = transcript.fetch()
+        transcript, translated = choose_transcript(call_with_retry(lambda: api.list(video_id), category="transcript.list", is_retryable=_transcript_retryable), languages, preference, allow_translation)
+        fetched = call_with_retry(transcript.fetch, category="transcript.fetch", is_retryable=_transcript_retryable)
         snippets = getattr(fetched, "snippets", fetched)
         return transcript, translated, [{"text": x.text if hasattr(x, "text") else x["text"], "start": x.start if hasattr(x, "start") else x["start"], "duration": x.duration if hasattr(x, "duration") else x.get("duration", 0)} for x in snippets]
     except LanguageUnavailable: raise
@@ -46,7 +53,7 @@ def fetch_selected(video_id: str, languages: list[str], preference: str, allow_t
 def available_transcripts(video_id: str) -> list[dict]:
     """Read caption tracks without writing a subtitle file."""
     try:
-        tracks = YouTubeTranscriptApi().list(video_id)
+        tracks = call_with_retry(lambda: YouTubeTranscriptApi().list(video_id), category="transcript.list", is_retryable=_transcript_retryable)
         return [{"language": t.language, "language_code": t.language_code, "is_generated": t.is_generated,
                  "is_translatable": t.is_translatable} for t in tracks]
     except Exception as exc:

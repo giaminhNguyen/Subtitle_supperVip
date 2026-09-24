@@ -3,11 +3,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
-from .config import set_youtube_api_key, settings, youtube_api_key_configured
+from .config import settings
 from .database import get_db
 from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Video, VideoStatus
 from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut, YouTubeApiKeyUpdate
 from .services.jobs import enqueue
+from .services.runtime_settings import set_youtube_api_key, youtube_api_key_configured
 from .services.youtube import YouTubeDataClient, YouTubeError
 from .services.subtitles import BlockedByYouTube, SubtitleUnavailable, available_transcripts
 
@@ -154,7 +155,7 @@ def control_job(job_id: str, action: str, db: Session = Depends(get_db)):
     if action == "pause" and job.status == JobStatus.queued: job.status = JobStatus.paused
     elif action == "resume" and job.status == JobStatus.paused: job.status = JobStatus.queued
     elif action == "cancel" and job.status in [JobStatus.queued, JobStatus.paused]: job.status = JobStatus.cancelled
-    elif action == "retry" and job.status == JobStatus.failed: job.status, job.attempts, job.scheduled_at, job.error = JobStatus.queued, 0, datetime.utcnow(), None
+    elif action == "retry" and job.status == JobStatus.failed: job.status, job.attempts, job.scheduled_at, job.error, job.worker_id, job.lease_expires_at = JobStatus.queued, 0, datetime.utcnow(), None, None, None
     else: raise HTTPException(409, "Không thể thực hiện thao tác với trạng thái hiện tại")
     db.commit(); return job
 

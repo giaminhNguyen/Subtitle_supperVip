@@ -6,12 +6,21 @@ services:
     volumes:
       - ./data:/app/data
     ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
   worker:
     build: ./backend
-    command: sh -c "alembic upgrade head && python -m app.worker"
+    command: python -m app.worker
     env_file: .env
     volumes:
       - ./data:/app/data
+    # The API container applies migrations; the worker waits for it so both never migrate the shared SQLite file at once.
+    depends_on:
+      api:
+        condition: service_healthy
   web:
     build: ./frontend
     environment:

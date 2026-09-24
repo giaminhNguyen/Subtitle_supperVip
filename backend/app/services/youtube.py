@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime
 import httpx
 from dateutil.parser import isoparse
-from ..config import get_youtube_api_key
+from .ratelimit import call_with_retry
+from .runtime_settings import get_youtube_api_key
 
 API = "https://www.googleapis.com/youtube/v3"
 CHANNEL_RE = re.compile(r"youtube\.com/channel/([\w-]+)", re.I)
@@ -12,6 +13,32 @@ USER_RE = re.compile(r"youtube\.com/user/([\w.-]+)", re.I)
 
 
 class YouTubeError(RuntimeError): pass
+
+
+class YouTubeHTTPError(YouTubeError):
+    def __init__(self, status: int, message: str, reason: str = "", retry_after: float | None = None):
+        super().__init__(message)
+        self.status, self.reason, self.retry_after = status, reason, retry_after
+
+    @property
+    def retryable(self) -> bool:
+        # 400/401/404 and quota/credential 403s are permanent; only rate-limit style 403s retry.
+        return self.status == 429 or self.status in (500, 502, 503, 504) or (self.status == 403 and self.reason in ("rateLimitExceeded", "userRateLimitExceeded"))
+
+
+def _error_reason(response: httpx.Response) -> str:
+    try: return response.json()["error"]["errors"][0]["reason"]
+    except Exception: return ""
+
+
+def _retry_after(response: httpx.Response) -> float | None:
+    try: return float(response.headers.get("Retry-After", ""))
+    except ValueError: return None
+
+
+def _is_retryable(exc: Exception) -> tuple[bool, float | None]:
+    if isinstance(exc, YouTubeHTTPError): return exc.retryable, exc.retry_after
+    return isinstance(exc, httpx.TransportError), None
 
 
 @dataclass
@@ -37,9 +64,18 @@ class YouTubeDataClient:
 
     def _get(self, resource: str, params: dict) -> dict:
         if not self.key: raise YouTubeError("Chưa cấu hình YOUTUBE_API_KEY")
-        response = httpx.get(f"{API}/{resource}", params={**params, "key": self.key}, timeout=30)
-        if response.status_code >= 400: raise YouTubeError(f"YouTube Data API {response.status_code}: {response.text[:300]}")
-        return response.json()
+        def request() -> dict:
+            response = httpx.get(f"{API}/{resource}", params={**params, "key": self.key}, timeout=30)
+            if response.status_code >= 400:
+                raise YouTubeHTTPError(response.status_code, self._redact(f"YouTube Data API {response.status_code}: {response.text[:300]}"), _error_reason(response), _retry_after(response))
+            return response.json()
+        try:
+            return call_with_retry(request, category=f"youtube.{resource}", is_retryable=_is_retryable, redact=self._redact)
+        except httpx.TransportError as exc:  # never let the request URL (which carries the key) escape
+            raise YouTubeError(self._redact(f"Lỗi kết nối YouTube Data API: {type(exc).__name__}")) from None
+
+    def _redact(self, text: str) -> str:
+        return text.replace(self.key, "***") if self.key else text
 
     def resolve_channel(self, url: str) -> ResolvedChannel:
         key, value = parse_channel_url(url)

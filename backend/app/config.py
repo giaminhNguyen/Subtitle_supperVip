@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 2
     cors_origins: str = "http://localhost:5173"
     max_job_attempts: int = 5
+    request_max_attempts: int = 4  # 1 try + 3 retries for transient external errors
+    job_lease_seconds: int = 300  # a worker that stops heartbeating loses its job after this
 
 
 settings = Settings()
@@ -43,38 +45,19 @@ settings.data_dir.mkdir(parents=True, exist_ok=True)
 settings.database_url = _normalise_database_url(settings.database_url)
 
 
-def get_youtube_api_key() -> str:
-    """Read the key from disk so a running worker sees web/CLI updates."""
+PLACEHOLDER_KEYS = {"", "replace_me", "your_google_youtube_data_api_key"}
+
+
+def read_legacy_youtube_api_key() -> str:
+    """Key from a pre-database install (.env file, else process environment).
+
+    Only used to seed the shared settings table; see services/runtime_settings.py.
+    """
+    candidates = []
     if ENV_FILE.exists():
         for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
             name, separator, value = line.partition("=")
             if separator and name.strip() == "YOUTUBE_API_KEY":
-                key = value.strip().strip('"').strip("'")
-                return "" if key.lower() in {"", "replace_me", "your_google_youtube_data_api_key"} else key
-    return settings.youtube_api_key.strip()
-
-
-def youtube_api_key_configured() -> bool:
-    return bool(get_youtube_api_key())
-
-
-def set_youtube_api_key(api_key: str) -> None:
-    """Persist a key without exposing it through the API response or logs."""
-    key = api_key.strip()
-    if len(key) < 10 or any(character in key for character in "\r\n"):
-        raise ValueError("API key không hợp lệ")
-
-    lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
-    replacement = f"YOUTUBE_API_KEY={key}"
-    for index, line in enumerate(lines):
-        name, separator, _ = line.partition("=")
-        if separator and name.strip() == "YOUTUBE_API_KEY":
-            lines[index] = replacement
-            break
-    else:
-        lines.append(replacement)
-
-    temporary_file = ENV_FILE.with_name(".env.tmp")
-    temporary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    temporary_file.replace(ENV_FILE)
-    settings.youtube_api_key = key
+                candidates.append(value.strip().strip('"').strip("'"))
+    candidates.append(settings.youtube_api_key.strip())
+    return next((key for key in candidates if key.lower() not in PLACEHOLDER_KEYS), "")

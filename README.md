@@ -30,7 +30,7 @@ stop-app.bat
 3. Vào **APIs & Services → Credentials → Create Credentials → API key**.
 4. Sau khi chạy ứng dụng, dán key vào phần **Cấu hình YouTube API key** trên trang chủ.
 
-Key được lưu cục bộ trong `.env`; ứng dụng không trả key về web sau khi đã lưu. `.env` đã được bỏ qua bởi Git.
+Key được lưu trong database SQLite cục bộ (`data/app.db`, dùng chung giữa API và worker, kể cả Docker); ứng dụng không trả key về web sau khi đã lưu. Nếu bạn đã có `YOUTUBE_API_KEY` trong `.env`, key đó được tự nhập vào database ở lần dùng đầu tiên (DB thắng nếu đã có). `.env` và `data/` đã được bỏ qua bởi Git.
 
 Hoặc nhập key qua terminal mà không hiện ký tự đã gõ:
 
