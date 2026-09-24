@@ -51,6 +51,14 @@ Không truyền key trực tiếp trên command line vì có thể bị lưu và
 
 Ứng dụng nhận các dạng URL `@handle`, `/channel/ID`, `/user/...` và custom URL. Chỉ video công khai được YouTube Data API trả về mới được quét.
 
+### Giao diện
+
+- **Tự làm mới**: dashboard, danh sách video và Jobs & logs tự cập nhật (nhanh hơn khi có job đang chạy, chậm khi rảnh) và tạm dừng khi tab bị ẩn; không bao giờ gửi chồng request.
+- **Phân trang**: video, job và log dùng `limit`/`offset` (tối đa 500/lần, giao diện dùng 50); tổng số nằm trong header `X-Total-Count`.
+- **Chẩn đoán**: bấm nhãn trạng thái ở đầu trang (hoặc mở trang Chẩn đoán) để xem worker, database, dung lượng, hàng đợi và SyncRun đang chạy.
+- **Retry job lỗi** ngay trong Jobs & logs; API từ chối (409) nếu đã có job đang hoạt động cho cùng video/kênh.
+- Chạy kiểm thử giao diện: `cd frontend && npm test`.
+
 ### Đồng bộ kênh
 
 - **Sync new** (và lịch tự động) chỉ quét các video mới nhất: duyệt playlist uploads từ mới đến cũ và dừng khi gặp lại video mốc đã lưu cộng thêm một dải video đã biết (`SYNC_SAFETY_WINDOW`, mặc định 20). Lần đồng bộ đầu tiên của kênh (hoặc kênh cũ chưa có mốc, hoặc mốc không còn trong playlist) sẽ tự quét toàn bộ lịch sử một lần rồi mới dùng chế độ nhanh.

@@ -1,12 +1,13 @@
 from datetime import datetime
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from .config import settings
 from .database import SessionLocal, get_db
-from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Video, VideoStatus
+from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Subtitle, Video, VideoStatus
 from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut, YouTubeApiKeyUpdate
 from .services.jobs import enqueue
 from .services.health import diagnostics, health_summary
@@ -16,7 +17,13 @@ from .services.youtube import YouTubeDataClient, YouTubeError
 from .services.subtitles import BlockedByYouTube, SubtitleUnavailable, available_transcripts
 
 app = FastAPI(title="YouTube Subtitle Manager", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Total-Count"])
+
+
+def paged(db: Session, response: Response, query, order_by: tuple, limit: int, offset: int):
+    """Stable page of `query` (list body stays a plain array; the total goes in X-Total-Count)."""
+    response.headers["X-Total-Count"] = str(db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0)
+    return db.scalars(query.order_by(*order_by, ).limit(limit).offset(offset)).all()
 
 
 def channel_or_404(db: Session, channel_id: str) -> Channel:
@@ -113,13 +120,14 @@ def sync_new(channel_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/api/channels/{channel_id}/videos", response_model=list[VideoOut])
-def list_channel_videos(channel_id: str, status: VideoStatus | None = None, q: str | None = None, language: str | None = None, db: Session = Depends(get_db)):
+def list_channel_videos(channel_id: str, response: Response, status: VideoStatus | None = None, q: str | None = None, language: str | None = None,
+                        limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
     channel_or_404(db, channel_id)
     query = select(Video).options(selectinload(Video.subtitles)).where(Video.channel_id == channel_id)
     if status: query = query.where(Video.status == status)
     if q: query = query.where(Video.title.ilike(f"%{q}%"))
-    if language: query = query.join(Video.subtitles).where(__import__("app.models", fromlist=["Subtitle"]).Subtitle.language_code == language)
-    return db.scalars(query.order_by(Video.published_at.desc())).unique().all()
+    if language: query = query.where(Video.id.in_(select(Subtitle.video_id).where(Subtitle.language_code == language)))  # subquery, not a join: keeps rows and totals unique
+    return paged(db, response, query, (Video.published_at.desc(), Video.id), limit, offset)
 
 
 @app.get("/api/videos/{video_id}", response_model=VideoOut)
@@ -149,17 +157,17 @@ def download_video(video_id: str, force: bool = False, db: Session = Depends(get
 
 
 @app.get("/api/videos")
-def all_videos(status: VideoStatus | None = None, limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+def all_videos(response: Response, status: VideoStatus | None = None, limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
     query = select(Video).options(selectinload(Video.subtitles))
     if status: query = query.where(Video.status == status)
-    return db.scalars(query.order_by(Video.published_at.desc()).limit(limit)).unique().all()
+    return paged(db, response, query, (Video.published_at.desc(), Video.id), limit, offset)
 
 
 @app.get("/api/jobs")
-def jobs(status: JobStatus | None = None, db: Session = Depends(get_db)):
+def jobs(response: Response, status: JobStatus | None = None, limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
     query = select(Job)
     if status: query = query.where(Job.status == status)
-    return db.scalars(query.order_by(Job.created_at.desc()).limit(500)).all()
+    return paged(db, response, query, (Job.created_at.desc(), Job.id), limit, offset)
 
 
 @app.post("/api/jobs/{job_id}/{action}")
@@ -169,14 +177,21 @@ def control_job(job_id: str, action: str, db: Session = Depends(get_db)):
     if action == "pause" and job.status == JobStatus.queued: job.status = JobStatus.paused
     elif action == "resume" and job.status == JobStatus.paused: job.status = JobStatus.queued
     elif action == "cancel" and job.status in [JobStatus.queued, JobStatus.paused]: job.status = JobStatus.cancelled
-    elif action == "retry" and job.status == JobStatus.failed: job.status, job.attempts, job.scheduled_at, job.error, job.worker_id, job.lease_expires_at, job.outcome = JobStatus.queued, 0, datetime.utcnow(), None, None, None, None
+    elif action == "retry" and job.status == JobStatus.failed:
+        clash = db.scalar(select(Job.id).where(Job.id != job.id, Job.kind == job.kind, Job.channel_id == job.channel_id, Job.video_id == job.video_id, Job.status.in_([JobStatus.queued, JobStatus.processing, JobStatus.paused])).limit(1))
+        if clash: raise HTTPException(409, "Đã có job đang hoạt động cho mục này; không cần thử lại job cũ")
+        job.status, job.attempts, job.scheduled_at, job.error, job.worker_id, job.lease_expires_at, job.outcome = JobStatus.queued, 0, datetime.utcnow(), None, None, None, None
     else: raise HTTPException(409, "Không thể thực hiện thao tác với trạng thái hiện tại")
-    db.flush(); refresh_sync_run_state(db, job.sync_run_id)  # pause/cancel/retry change what the run is waiting for
-    db.commit(); return job
+    try:
+        db.flush(); refresh_sync_run_state(db, job.sync_run_id)  # pause/cancel/retry change what the run is waiting for
+        db.commit()
+    except IntegrityError:  # lost a race with another active job for the same target (partial unique index)
+        db.rollback(); raise HTTPException(409, "Đã có job đang hoạt động cho mục này")
+    return job
 
 
 @app.get("/api/logs")
-def logs(job_id: str | None = None, db: Session = Depends(get_db)):
+def logs(response: Response, job_id: str | None = None, limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
     query = select(JobLog)
     if job_id: query = query.where(JobLog.job_id == job_id)
-    return db.scalars(query.order_by(JobLog.created_at.desc()).limit(1000)).all()
+    return paged(db, response, query, (JobLog.created_at.desc(), JobLog.id), limit, offset)
