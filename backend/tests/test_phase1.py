@@ -85,10 +85,13 @@ def no_wait(monkeypatch):
     ratelimit.reset_youtube_limiter()
 
 
+TIMEOUTS = []
+
+
 def script_httpx(monkeypatch, responses):
     calls = []
     def fake_get(url, params, timeout):
-        calls.append(params)
+        calls.append(params); TIMEOUTS.append(timeout)
         item = responses[min(len(calls), len(responses)) - 1]
         if isinstance(item, Exception): raise item
         return item
@@ -221,7 +224,9 @@ def test_heartbeat_extends_lease_and_detects_lost_job(shared_db):
     assert queue.Heartbeat(Session, job_id, "A", 300).beat()
     s.expire_all(); assert s.get(Job, job_id).lease_expires_at > datetime.utcnow() + timedelta(seconds=200)
     assert not queue.Heartbeat(Session, job_id, "B", 300).beat()
-    assert queue.owns_job(Session, job_id, "A") and not queue.owns_job(Session, job_id, "B")
+    queue.guard_job(s, job_id, "A", 0); s.rollback()
+    with pytest.raises(queue.LostOwnership): queue.guard_job(s, job_id, "B", 0)
+    with pytest.raises(queue.LostOwnership): queue.guard_job(s, job_id, "A", 1)  # right worker, wrong attempt
 
 
 def test_worker_abandons_result_when_lease_was_taken(shared_db, monkeypatch):
@@ -348,10 +353,10 @@ def test_process_download_writes_atomically_and_stores_relative_paths(shared_db,
     channel = Channel(youtube_channel_id="UC1", title="Kênh", url="u"); channel.settings = ChannelSettings(export_formats=["srt", "txt"])
     video = Video(channel=channel, youtube_video_id="abc", title="Tiêu đề", url="u", published_at=datetime(2025, 3, 1))
     s.add(video); s.commit()
-    job = Job(kind="download", channel_id=channel.id, video_id=video.id); s.add(job); s.commit()
+    job = Job(kind="download", channel_id=channel.id, video_id=video.id, status=JobStatus.processing, worker_id=worker.WORKER_ID); s.add(job); s.commit()
     transcript = type("T", (), {"language": "Vietnamese", "language_code": "vi", "is_generated": False, "is_translatable": False})()
     monkeypatch.setattr(worker, "fetch_selected", lambda *a: (transcript, False, [{"text": "Chào", "start": 0, "duration": 1}]))
-    worker.process_download(s, job); s.commit()
+    result = worker.process_download(s, job); worker.apply_download_result(s, video.id, result); s.commit()
     subtitles = s.scalars(select(Subtitle)).all()
     assert {x.file_path for x in subtitles} == {f"Kênh/2025-03-Tiêu đề-abc/vi.{ext}" for ext in ("srt", "txt")}
     assert s.get(Video, video.id).subtitle_path == "Kênh/2025-03-Tiêu đề-abc/vi.srt"

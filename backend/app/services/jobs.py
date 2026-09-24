@@ -22,11 +22,13 @@ def enqueue(db: Session, kind: str, *, channel_id: str | None = None, video_id: 
     return job
 
 
-def scan_channel(db: Session, channel: Channel, mode: str, since: datetime | None = None) -> tuple[int, int]:
+def scan_channel(db: Session, channel: Channel, mode: str, since: datetime | None = None, checkpoint=None) -> tuple[int, int]:
+    """`checkpoint()` runs before every commit; the worker uses it to prove it still owns the job."""
+    checkpoint = checkpoint or (lambda: None)
     if isinstance(since, str):
         from dateutil.parser import isoparse
         since = isoparse(since).replace(tzinfo=None)
-    run = SyncRun(channel_id=channel.id, mode=mode); db.add(run); db.commit()  # never hold the SQLite write lock across network calls
+    run = SyncRun(channel_id=channel.id, mode=mode); db.add(run); checkpoint(); db.commit()  # never hold the SQLite write lock across network calls
     found = queued = 0
     for metadata in YouTubeDataClient().list_uploads(YouTubeDataClient().resolve_channel(channel.url).uploads_playlist_id):
         if since and metadata["published_at"] and metadata["published_at"] < since: continue
@@ -38,7 +40,7 @@ def scan_channel(db: Session, channel: Channel, mode: str, since: datetime | Non
         eligible = mode == "all" or (mode == "retryable" and video.status in [VideoStatus.failed, VideoStatus.no_subtitle, VideoStatus.language_unavailable, VideoStatus.blocked]) or (mode in ["new", "since"] and video.status == VideoStatus.pending)
         if eligible and video.status != VideoStatus.completed:
             enqueue(db, "download", channel_id=channel.id, video_id=video.id, payload={"sync_run_id": run.id}); queued += 1
-        db.commit()
+        checkpoint(); db.commit()
     channel.video_count = db.scalar(select(func.count(Video.id)).where(Video.channel_id == channel.id)) or 0
     channel.last_scanned_at = datetime.utcnow(); channel.next_sync_at = datetime.utcnow() + timedelta(hours=channel.settings.sync_interval_hours)
     run.new_videos, run.queued_videos, run.finished_at = found, queued, datetime.utcnow()

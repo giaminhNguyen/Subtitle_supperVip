@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import httpx
 from dateutil.parser import isoparse
+from ..config import settings
 from .ratelimit import call_with_retry
 from .runtime_settings import get_youtube_api_key
 
@@ -10,6 +11,12 @@ API = "https://www.googleapis.com/youtube/v3"
 CHANNEL_RE = re.compile(r"youtube\.com/channel/([\w-]+)", re.I)
 HANDLE_RE = re.compile(r"youtube\.com/@([\w.-]+)", re.I)
 USER_RE = re.compile(r"youtube\.com/user/([\w.-]+)", re.I)
+
+
+def request_timeout() -> httpx.Timeout:
+    """Explicit connect/read/write/pool timeouts (httpx's own default is 5s and easy to forget)."""
+    total = settings.request_timeout_seconds
+    return httpx.Timeout(total, connect=min(10.0, total))
 
 
 class YouTubeError(RuntimeError): pass
@@ -65,7 +72,7 @@ class YouTubeDataClient:
     def _get(self, resource: str, params: dict) -> dict:
         if not self.key: raise YouTubeError("Chưa cấu hình YOUTUBE_API_KEY")
         def request() -> dict:
-            response = httpx.get(f"{API}/{resource}", params={**params, "key": self.key}, timeout=30)
+            response = httpx.get(f"{API}/{resource}", params={**params, "key": self.key}, timeout=request_timeout())
             if response.status_code >= 400:
                 raise YouTubeHTTPError(response.status_code, self._redact(f"YouTube Data API {response.status_code}: {response.text[:300]}"), _error_reason(response), _retry_after(response))
             return response.json()

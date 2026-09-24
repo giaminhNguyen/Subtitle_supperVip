@@ -3,6 +3,7 @@ import logging
 import os
 import socket
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 
@@ -63,20 +64,30 @@ def recover_stale_jobs(db: Session, now: datetime | None = None) -> int:
     return recovered
 
 
-def owns_job(session_factory, job_id: str, worker_id: str) -> bool:
-    """Fresh-session check that this worker still holds the job (lease not lost to recovery)."""
-    db = session_factory()
-    try:
-        return db.scalar(select(Job.id).where(Job.id == job_id, Job.status == JobStatus.processing, Job.worker_id == worker_id)) is not None
-    finally:
-        db.close()
+class LostOwnership(Exception):
+    """This worker no longer holds the job (lease expired and it was recovered/re-claimed)."""
+
+
+def guard_job(db: Session, job_id: str, owner: str, attempts: int, **values) -> None:
+    """Compare-and-set on the job row: applies `values` only if `owner` still owns this exact claim (worker id + attempt number,
+    both captured at claim time so a rollback/expire cannot change what we compare against).
+
+    The UPDATE takes SQLite's write lock, so when it succeeds nobody can take the job away before
+    the surrounding transaction commits. Callers put all result writes *after* this call in the
+    same transaction; on LostOwnership they must roll back.
+    """
+    result = db.execute(update(Job).where(Job.id == job_id, Job.status == JobStatus.processing, Job.worker_id == owner, Job.attempts == attempts)
+                        .values(values or {"worker_id": owner}).execution_options(synchronize_session=False))
+    if result.rowcount != 1:
+        raise LostOwnership(job_id)
 
 
 class Heartbeat:
     """Background thread that keeps a job's lease alive while the worker is busy (uses its own session)."""
 
-    def __init__(self, session_factory, job_id: str, worker_id: str, lease_seconds: int):
+    def __init__(self, session_factory, job_id: str, worker_id: str, lease_seconds: int, max_runtime_seconds: float = float("inf")):
         self._factory, self._job_id, self._worker_id, self._lease = session_factory, job_id, worker_id, lease_seconds
+        self._max_runtime, self._started = max_runtime_seconds, time.monotonic()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name=f"heartbeat-{job_id[:8]}")
 
@@ -92,6 +103,9 @@ class Heartbeat:
 
     def _run(self):
         while not self._stop.wait(max(1.0, self._lease / 3)):
+            if time.monotonic() - self._started > self._max_runtime:
+                logger.error("Job %s chạy quá thời gian tối đa; ngừng gia hạn lease để job có thể bị thu hồi", self._job_id)
+                return
             try:
                 if not self.beat():
                     logger.warning("Lease của job %s đã mất", self._job_id)

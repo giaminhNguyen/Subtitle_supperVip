@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Local layout: <project>/backend/app/config.py.
@@ -18,7 +19,18 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     max_job_attempts: int = 5
     request_max_attempts: int = 4  # 1 try + 3 retries for transient external errors
+    request_timeout_seconds: float = 30  # per-operation timeout for every outbound HTTP call
     job_lease_seconds: int = 300  # a worker that stops heartbeating loses its job after this
+    job_max_runtime_seconds: int = 10800  # heartbeat stops renewing the lease after this, so a hung job is always reclaimable
+
+    @model_validator(mode="after")
+    def _sane_timing(self):
+        # Heartbeat fires every lease/3, so a lease this long tolerates two missed beats
+        # (e.g. SQLite busy_timeout of 5s) without another worker reclaiming a live job.
+        if self.job_lease_seconds < 30: raise ValueError("JOB_LEASE_SECONDS phải >= 30")
+        if self.job_max_runtime_seconds <= self.job_lease_seconds: raise ValueError("JOB_MAX_RUNTIME_SECONDS phải lớn hơn JOB_LEASE_SECONDS")
+        if self.request_timeout_seconds <= 0 or self.request_max_attempts < 1: raise ValueError("REQUEST_TIMEOUT_SECONDS/REQUEST_MAX_ATTEMPTS không hợp lệ")
+        return self
 
 
 settings = Settings()
