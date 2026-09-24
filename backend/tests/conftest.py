@@ -15,7 +15,8 @@ def db(tmp_path):
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     session = Session()
     yield session
-    session.close(); Base.metadata.drop_all(engine)
+    session.close()
+    Base.metadata.drop_all(engine)
 
 
 @pytest.fixture
@@ -30,7 +31,8 @@ def shared_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
-    root = tmp_path / "A" / "data"; root.mkdir(parents=True)
+    root = tmp_path / "A" / "data"
+    root.mkdir(parents=True)
     monkeypatch.setattr(settings, "data_dir", root)
     return root
 
@@ -38,7 +40,8 @@ def data_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def no_wait(monkeypatch):
     sleeps = []
-    monkeypatch.setattr(settings, "requests_per_minute", 0); ratelimit.reset_youtube_limiter()
+    monkeypatch.setattr(settings, "requests_per_minute", 0)
+    ratelimit.reset_youtube_limiter()
     monkeypatch.setattr(ratelimit.time, "sleep", sleeps.append)
     yield sleeps
     ratelimit.reset_youtube_limiter()

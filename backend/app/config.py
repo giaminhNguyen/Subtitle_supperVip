@@ -40,14 +40,29 @@ class Settings(BaseSettings):
     def _sane_timing(self):
         # Heartbeat fires every lease/3, so a lease this long tolerates two missed beats
         # (e.g. SQLite busy_timeout of 5s) without another worker reclaiming a live job.
-        if self.job_lease_seconds < 30: raise ValueError("JOB_LEASE_SECONDS phải >= 30")
-        if self.job_max_runtime_seconds <= self.job_lease_seconds: raise ValueError("JOB_MAX_RUNTIME_SECONDS phải lớn hơn JOB_LEASE_SECONDS")
+        if self.job_lease_seconds < 30:
+            raise ValueError("JOB_LEASE_SECONDS phải >= 30")
+        if self.job_max_runtime_seconds <= self.job_lease_seconds:
+            raise ValueError("JOB_MAX_RUNTIME_SECONDS phải lớn hơn JOB_LEASE_SECONDS")
         if self.worker_heartbeat_seconds <= 0 or self.worker_stale_seconds < 2 * self.worker_heartbeat_seconds:
             raise ValueError("WORKER_STALE_SECONDS phải >= 2 x WORKER_HEARTBEAT_SECONDS (chịu được một nhịp bị trượt)")
-        if min(self.db_backup_keep_count, self.runtime_log_retention_days, self.job_history_retention_days, self.job_log_retention_days, self.worker_record_retention_days, self.scan_failure_retry_minutes) < 1 or self.maintenance_interval_hours <= 0:
+        if (
+            min(
+                self.db_backup_keep_count,
+                self.runtime_log_retention_days,
+                self.job_history_retention_days,
+                self.job_log_retention_days,
+                self.worker_record_retention_days,
+                self.scan_failure_retry_minutes,
+            )
+            < 1
+            or self.maintenance_interval_hours <= 0
+        ):
             raise ValueError("Các cấu hình retention/backup phải là số dương")
-        if self.sync_safety_window < 1: raise ValueError("SYNC_SAFETY_WINDOW phải >= 1")
-        if self.request_timeout_seconds <= 0 or self.request_max_attempts < 1: raise ValueError("REQUEST_TIMEOUT_SECONDS/REQUEST_MAX_ATTEMPTS không hợp lệ")
+        if self.sync_safety_window < 1:
+            raise ValueError("SYNC_SAFETY_WINDOW phải >= 1")
+        if self.request_timeout_seconds <= 0 or self.request_max_attempts < 1:
+            raise ValueError("REQUEST_TIMEOUT_SECONDS/REQUEST_MAX_ATTEMPTS không hợp lệ")
         return self
 
 

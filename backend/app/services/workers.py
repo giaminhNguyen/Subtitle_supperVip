@@ -5,6 +5,7 @@ worker's main loop is demonstrably making progress: the heartbeat thread stops w
 has stalled while idle, or a job has run longer than JOB_MAX_RUNTIME_SECONDS, so a hung worker turns
 stale instead of looking healthy.
 """
+
 import logging
 import os
 import socket
@@ -32,13 +33,16 @@ class WorkerState:
 
     def tick(self):
         """Main loop is alive (called every iteration)."""
-        with self._lock: self.loop_at = self._clock()
+        with self._lock:
+            self.loop_at = self._clock()
 
     def busy(self, job_id: str | None):
-        with self._lock: self.state, self.job_id, self.since, self.loop_at = "busy", job_id, self._clock(), self._clock()
+        with self._lock:
+            self.state, self.job_id, self.since, self.loop_at = "busy", job_id, self._clock(), self._clock()
 
     def idle(self):
-        with self._lock: self.state, self.job_id, self.since, self.loop_at = "idle", None, self._clock(), self._clock()
+        with self._lock:
+            self.state, self.job_id, self.since, self.loop_at = "idle", None, self._clock(), self._clock()
 
     def snapshot(self) -> tuple[str, str | None, bool]:
         """(state, job_id, progressing) - progressing is False for a stalled idle loop or an over-long job."""
@@ -70,27 +74,35 @@ class HeartbeatThread:
 
     def beat_once(self) -> bool:
         state, job_id, progressing = self._state.snapshot()
-        if not progressing: return False
-        with self._factory() as db: write_heartbeat(db, self._worker_id, self._started_at, state, job_id)
+        if not progressing:
+            return False
+        with self._factory() as db:
+            write_heartbeat(db, self._worker_id, self._started_at, state, job_id)
         return True
 
     def _run(self):
         while True:
             try:
-                if not self.beat_once(): logger.error("Worker loop không tiến triển; ngừng ghi heartbeat")
+                if not self.beat_once():
+                    logger.error("Worker loop không tiến triển; ngừng ghi heartbeat")
             except Exception:  # e.g. "database is locked": the next beat retries
                 logger.exception("Không ghi được heartbeat")
-            if self._stop.wait(settings.worker_heartbeat_seconds): return
+            if self._stop.wait(settings.worker_heartbeat_seconds):
+                return
 
     def start(self):
-        self._thread.start(); return self
+        self._thread.start()
+        return self
 
     def stop(self):
-        self._stop.set(); self._thread.join(timeout=5)
+        self._stop.set()
+        self._thread.join(timeout=5)
         try:
             with self._factory() as db:  # best effort: a clean shutdown should not look like a crash
-                db.execute(delete(WorkerHeartbeat).where(WorkerHeartbeat.worker_id == self._worker_id)); db.commit()
-        except Exception: pass
+                db.execute(delete(WorkerHeartbeat).where(WorkerHeartbeat.worker_id == self._worker_id))
+                db.commit()
+        except Exception:
+            pass
 
 
 def worker_summary(db: Session, now: datetime | None = None) -> dict:
@@ -100,9 +112,13 @@ def worker_summary(db: Session, now: datetime | None = None) -> dict:
     rows = db.scalars(select(WorkerHeartbeat).order_by(WorkerHeartbeat.last_heartbeat_at.desc())).all()
     active = [r for r in rows if r.last_heartbeat_at >= cutoff]
     status = "running" if active else ("offline" if rows else "absent")
-    return {"status": status, "active": len(active), "stale": len(rows) - len(active),
-            "last_heartbeat": (rows[0].last_heartbeat_at.isoformat() if rows else None),
-            "busy": sum(1 for r in active if r.state == "busy")}
+    return {
+        "status": status,
+        "active": len(active),
+        "stale": len(rows) - len(active),
+        "last_heartbeat": (rows[0].last_heartbeat_at.isoformat() if rows else None),
+        "busy": sum(1 for r in active if r.state == "busy"),
+    }
 
 
 def cleanup_worker_records(db: Session, now: datetime | None = None) -> int:

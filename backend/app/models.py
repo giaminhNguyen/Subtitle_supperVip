@@ -17,17 +17,32 @@ def now() -> datetime:
 
 
 class VideoStatus(str, enum.Enum):
-    pending = "pending"; queued = "queued"; processing = "processing"; completed = "completed"
-    no_subtitle = "no_subtitle"; language_unavailable = "language_unavailable"; failed = "failed"
-    blocked = "blocked"; skipped = "skipped"
+    pending = "pending"
+    queued = "queued"
+    processing = "processing"
+    completed = "completed"
+    no_subtitle = "no_subtitle"
+    language_unavailable = "language_unavailable"
+    failed = "failed"
+    blocked = "blocked"
+    skipped = "skipped"
 
 
 class JobStatus(str, enum.Enum):
-    queued = "queued"; processing = "processing"; paused = "paused"; completed = "completed"; failed = "failed"; cancelled = "cancelled"
+    queued = "queued"
+    processing = "processing"
+    paused = "paused"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
 
 
 class SyncRunStatus(str, enum.Enum):
-    scanning = "scanning"; downloading = "downloading"; completed = "completed"; partial = "partial"; failed = "failed"
+    scanning = "scanning"
+    downloading = "downloading"
+    completed = "completed"
+    partial = "partial"
+    failed = "failed"
 
 
 ACTIVE_JOB_SQL = "status IN ('queued','processing','paused')"
@@ -58,7 +73,7 @@ class ChannelSettings(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     channel_id: Mapped[str] = mapped_column(ForeignKey("channels.id"), unique=True)
     preferred_languages: Mapped[list] = mapped_column(JSON, default=lambda: ["vi", "en", "original"])
-    subtitle_preference: Mapped[str] = mapped_column(String(20), default="any") # manual, auto, any
+    subtitle_preference: Mapped[str] = mapped_column(String(20), default="any")  # manual, auto, any
     allow_translation: Mapped[bool] = mapped_column(Boolean, default=True)
     export_formats: Mapped[list] = mapped_column(JSON, default=lambda: ["srt", "txt"])
     sync_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
@@ -111,7 +126,7 @@ class Job(Base):
         Index("uq_active_job_channel", "kind", "channel_id", unique=True, sqlite_where=text(f"video_id IS NULL AND {ACTIVE_JOB_SQL}")),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    kind: Mapped[str] = mapped_column(String(32)) # scan, download
+    kind: Mapped[str] = mapped_column(String(32))  # scan, download
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.queued, index=True)
     channel_id: Mapped[str | None] = mapped_column(ForeignKey("channels.id"), nullable=True, index=True)
     video_id: Mapped[str | None] = mapped_column(ForeignKey("videos.id"), nullable=True, index=True)
@@ -131,6 +146,7 @@ class Job(Base):
 
 class AppSetting(Base):
     """Key/value runtime settings shared by the API and worker processes."""
+
     __tablename__ = "app_settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
@@ -139,6 +155,7 @@ class AppSetting(Base):
 
 class WorkerHeartbeat(Base):
     """One row per worker process; refreshed by that worker's heartbeat thread. Stale rows = dead workers."""
+
     __tablename__ = "worker_heartbeats"
     worker_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     hostname: Mapped[str] = mapped_column(String(255), default="")
@@ -163,6 +180,7 @@ class SyncRun(Base):
 
     Counters and status are a snapshot derived from those jobs by services/syncruns.refresh_sync_run_state.
     """
+
     __tablename__ = "sync_runs"
     __table_args__ = (Index("ix_sync_runs_channel_status", "channel_id", "status"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

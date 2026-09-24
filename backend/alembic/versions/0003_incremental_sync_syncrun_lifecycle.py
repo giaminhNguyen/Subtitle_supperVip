@@ -4,6 +4,7 @@ Revision ID: 0003
 Revises: 0002
 Create Date: 2026-09-25
 """
+
 import json
 import logging
 
@@ -46,10 +47,12 @@ def upgrade():
         if run_id in runs:
             bind.execute(sa.text("UPDATE jobs SET sync_run_id = :run WHERE id = :id"), {"run": run_id, "id": job_id})
     # Outcome of already-finished download jobs, from what their video ended as.
-    bind.execute(sa.text("""UPDATE jobs SET outcome = CASE
+    bind.execute(
+        sa.text("""UPDATE jobs SET outcome = CASE
         WHEN status = 'completed' THEN COALESCE((SELECT CASE v.status WHEN 'no_subtitle' THEN 'no_subtitle' WHEN 'language_unavailable' THEN 'language_unavailable' ELSE 'success' END FROM videos v WHERE v.id = jobs.video_id), 'success')
         WHEN status = 'failed' THEN COALESCE((SELECT CASE v.status WHEN 'blocked' THEN 'blocked' ELSE 'failed' END FROM videos v WHERE v.id = jobs.video_id), 'failed')
-        END WHERE kind = 'download' AND status IN ('completed','failed')"""))
+        END WHERE kind = 'download' AND status IN ('completed','failed')""")
+    )
 
     op.create_index("ix_jobs_sync_run_id", "jobs", ["sync_run_id"])
     op.create_index("ix_jobs_claim", "jobs", ["status", "scheduled_at", "created_at"])
@@ -58,8 +61,10 @@ def upgrade():
 
     # Partial unique indexes make "one active job per target" a DB guarantee. Never delete legacy
     # duplicates to make them fit: if any exist, skip the index (enqueue() still de-duplicates in code).
-    for name, columns, where in (("uq_active_job_video", "kind, video_id", f"video_id IS NOT NULL AND {ACTIVE}"),
-                                 ("uq_active_job_channel", "kind, channel_id", f"video_id IS NULL AND {ACTIVE}")):
+    for name, columns, where in (
+        ("uq_active_job_video", "kind, video_id", f"video_id IS NOT NULL AND {ACTIVE}"),
+        ("uq_active_job_channel", "kind, channel_id", f"video_id IS NULL AND {ACTIVE}"),
+    ):
         duplicates = bind.execute(sa.text(f"SELECT 1 FROM jobs WHERE {where} GROUP BY {columns} HAVING count(*) > 1 LIMIT 1")).first()
         if duplicates:
             log.warning("Skipping %s: duplicate active jobs exist in this database", name)
@@ -78,6 +83,8 @@ def downgrade():
         batch.drop_column("outcome")
         batch.drop_column("sync_run_id")
     with op.batch_alter_table("sync_runs") as batch:
-        for column in ("error", "status", "language_unavailable"): batch.drop_column(column)
+        for column in ("error", "status", "language_unavailable"):
+            batch.drop_column(column)
     with op.batch_alter_table("channels") as batch:
-        for column in ("history_complete_at", "sync_cursor_video_id", "uploads_playlist_id"): batch.drop_column(column)
+        for column in ("history_complete_at", "sync_cursor_video_id", "uploads_playlist_id"):
+            batch.drop_column(column)

@@ -4,6 +4,7 @@ Revision ID: 0002
 Revises: 0001
 Create Date: 2026-09-25
 """
+
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -32,10 +33,13 @@ def _relative_to_data_dir(stored: str | None, data_dir: Path) -> str | None:
 def upgrade():
     op.add_column("jobs", sa.Column("worker_id", sa.String(128)))
     op.add_column("jobs", sa.Column("lease_expires_at", sa.DateTime()))
-    op.create_table("app_settings", sa.Column("key", sa.String(64), primary_key=True), sa.Column("value", sa.Text(), nullable=False), sa.Column("updated_at", sa.DateTime(), nullable=False))
+    op.create_table(
+        "app_settings", sa.Column("key", sa.String(64), primary_key=True), sa.Column("value", sa.Text(), nullable=False), sa.Column("updated_at", sa.DateTime(), nullable=False)
+    )
 
     # Conservative data step: only rewrite absolute paths that live inside the current DATA_DIR.
     from app.config import settings
+
     data_dir = settings.data_dir.resolve()
     connection = op.get_bind()
     for table, column in (("subtitles", "file_path"), ("videos", "subtitle_path")):

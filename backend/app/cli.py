@@ -1,4 +1,5 @@
 """Small local-only commands for configuring the application."""
+
 import argparse
 import getpass
 

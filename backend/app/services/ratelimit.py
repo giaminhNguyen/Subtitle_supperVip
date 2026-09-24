@@ -1,4 +1,5 @@
 """Central rate limiting + retry for outbound YouTube requests (Data API and transcripts)."""
+
 import logging
 import random
 import threading
@@ -60,9 +61,16 @@ def backoff_delay(attempt: int, retry_after: float | None = None, base: float = 
     return min(max(delay, retry_after or 0.0), MAX_BACKOFF_SECONDS)
 
 
-def call_with_retry(func: Callable[[], T], *, category: str, is_retryable: Callable[[Exception], tuple[bool, float | None]],
-                    limiter: RateLimiter | None = None, max_attempts: int | None = None,
-                    sleep: Callable[[float], None] | None = None, redact: Callable[[str], str] = str) -> T:
+def call_with_retry(
+    func: Callable[[], T],
+    *,
+    category: str,
+    is_retryable: Callable[[Exception], tuple[bool, float | None]],
+    limiter: RateLimiter | None = None,
+    max_attempts: int | None = None,
+    sleep: Callable[[float], None] | None = None,
+    redact: Callable[[str], str] = str,
+) -> T:
     """Run `func` under the rate limiter, retrying transient failures a bounded number of times.
 
     `is_retryable(exc)` returns (retry?, retry_after_seconds). Permanent errors and the

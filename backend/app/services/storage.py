@@ -1,4 +1,5 @@
 """Subtitle file storage: portable relative paths + crash-safe writes."""
+
 import os
 import tempfile
 from pathlib import Path

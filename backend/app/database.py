@@ -15,6 +15,7 @@ def make_engine(url: str) -> Engine:
     """Create an engine; SQLite gets the settings the API + worker processes need to share one file."""
     engine = create_engine(url, connect_args=_connect_args(url))
     if engine.dialect.name == "sqlite":
+
         @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_connection, _record):
             cursor = dbapi_connection.cursor()
@@ -22,6 +23,7 @@ def make_engine(url: str) -> Engine:
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+
     return engine
 
 

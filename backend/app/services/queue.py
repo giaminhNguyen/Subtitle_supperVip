@@ -1,4 +1,5 @@
 """DB-backed job queue primitives: atomic claim, lease heartbeat, stale-job recovery."""
+
 import logging
 import os
 import socket
@@ -32,9 +33,18 @@ def claim_next_job(db: Session, worker_id: str, lease_seconds: int, now: datetim
         job_id = db.scalar(select(Job.id).where(Job.status == JobStatus.queued, Job.scheduled_at <= now).order_by(Job.created_at).limit(1))
         if job_id is None:
             return None
-        claimed = db.execute(update(Job).where(Job.id == job_id, Job.status == JobStatus.queued).values(
-            status=JobStatus.processing, worker_id=worker_id, started_at=now, lease_expires_at=now + timedelta(seconds=lease_seconds), attempts=Job.attempts + 1,
-        ).execution_options(synchronize_session=False))
+        claimed = db.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.queued)
+            .values(
+                status=JobStatus.processing,
+                worker_id=worker_id,
+                started_at=now,
+                lease_expires_at=now + timedelta(seconds=lease_seconds),
+                attempts=Job.attempts + 1,
+            )
+            .execution_options(synchronize_session=False)
+        )
         if claimed.rowcount == 1:
             job = db.scalar(select(Job).where(Job.id == job_id).execution_options(populate_existing=True))
             log(db, job, f"Bắt đầu lần thử {job.attempts}")
@@ -51,16 +61,27 @@ def recover_stale_jobs(db: Session, now: datetime | None = None) -> int:
     recovered = 0
     for job in stale:
         exhausted = job.attempts >= job.max_attempts
-        values = dict(status=JobStatus.failed, finished_at=now, error="Worker dừng đột ngột và đã hết số lần thử", outcome="failed" if job.kind == "download" else None) if exhausted else dict(status=JobStatus.queued, scheduled_at=now)
+        values = (
+            dict(status=JobStatus.failed, finished_at=now, error="Worker dừng đột ngột và đã hết số lần thử", outcome="failed" if job.kind == "download" else None)
+            if exhausted
+            else dict(status=JobStatus.queued, scheduled_at=now)
+        )
         # Re-check the lease in the WHERE clause: a heartbeat may have renewed it since the SELECT.
-        result = db.execute(update(Job).where(Job.id == job.id, Job.status == JobStatus.processing, (Job.lease_expires_at.is_(None)) | (Job.lease_expires_at < now)).values(worker_id=None, lease_expires_at=None, **values).execution_options(synchronize_session=False))
+        result = db.execute(
+            update(Job)
+            .where(Job.id == job.id, Job.status == JobStatus.processing, (Job.lease_expires_at.is_(None)) | (Job.lease_expires_at < now))
+            .values(worker_id=None, lease_expires_at=None, **values)
+            .execution_options(synchronize_session=False)
+        )
         if result.rowcount == 1:
             recovered += 1
             log(db, job, "Job hết hạn lease; đánh dấu thất bại" if exhausted else "Khôi phục job bị gián đoạn (lease hết hạn)", "error" if exhausted else "warning")
             if exhausted and job.video_id:
                 from ..models import Video, VideoStatus
+
                 video = db.get(Video, job.video_id)
-                if video: video.status = VideoStatus.failed
+                if video:
+                    video.status = VideoStatus.failed
     db.flush()
     for run_id in {job.sync_run_id for job in stale if job.sync_run_id}:  # jobs failed above may close their run
         refresh_sync_run_state(db, run_id)
@@ -80,8 +101,12 @@ def guard_job(db: Session, job_id: str, owner: str, attempts: int, **values) -> 
     the surrounding transaction commits. Callers put all result writes *after* this call in the
     same transaction; on LostOwnership they must roll back.
     """
-    result = db.execute(update(Job).where(Job.id == job_id, Job.status == JobStatus.processing, Job.worker_id == owner, Job.attempts == attempts)
-                        .values(values or {"worker_id": owner}).execution_options(synchronize_session=False))
+    result = db.execute(
+        update(Job)
+        .where(Job.id == job_id, Job.status == JobStatus.processing, Job.worker_id == owner, Job.attempts == attempts)
+        .values(values or {"worker_id": owner})
+        .execution_options(synchronize_session=False)
+    )
     if result.rowcount != 1:
         raise LostOwnership(job_id)
 
@@ -98,8 +123,11 @@ class Heartbeat:
     def beat(self) -> bool:
         db = self._factory()
         try:
-            result = db.execute(update(Job).where(Job.id == self._job_id, Job.worker_id == self._worker_id, Job.status == JobStatus.processing)
-                                .values(lease_expires_at=datetime.utcnow() + timedelta(seconds=self._lease)))
+            result = db.execute(
+                update(Job)
+                .where(Job.id == self._job_id, Job.worker_id == self._worker_id, Job.status == JobStatus.processing)
+                .values(lease_expires_at=datetime.utcnow() + timedelta(seconds=self._lease))
+            )
             db.commit()
             return result.rowcount == 1
         finally:

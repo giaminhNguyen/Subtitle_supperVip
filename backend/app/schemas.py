@@ -27,16 +27,47 @@ class ScanRequest(BaseModel):
 
 
 class ChannelOut(BaseModel):
-    id: str; youtube_channel_id: str; url: str; title: str; avatar_url: str | None; added_at: datetime; video_count: int
-    class Config: from_attributes = True
+    id: str
+    youtube_channel_id: str
+    url: str
+    title: str
+    avatar_url: str | None
+    added_at: datetime
+    video_count: int
+
+    class Config:
+        from_attributes = True
 
 
 class SubtitleOut(BaseModel):
-    id: str; language: str; language_code: str; is_generated: bool; is_translatable: bool; is_translated: bool; format: str; file_path: str
-    class Config: from_attributes = True
+    id: str
+    language: str
+    language_code: str
+    is_generated: bool
+    is_translatable: bool
+    is_translated: bool
+    format: str
+    file_path: str
+
+    class Config:
+        from_attributes = True
 
 
 class VideoOut(BaseModel):
-    id: str; youtube_video_id: str; title: str; url: str; published_at: datetime | None; duration_seconds: int | None; thumbnail_url: str | None; video_type: str
-    status: VideoStatus; retry_count: int; last_error: str | None; last_processed_at: datetime | None; subtitle_path: str | None; subtitles: list[SubtitleOut] = []
-    class Config: from_attributes = True
+    id: str
+    youtube_video_id: str
+    title: str
+    url: str
+    published_at: datetime | None
+    duration_seconds: int | None
+    thumbnail_url: str | None
+    video_type: str
+    status: VideoStatus
+    retry_count: int
+    last_error: str | None
+    last_processed_at: datetime | None
+    subtitle_path: str | None
+    subtitles: list[SubtitleOut] = []
+
+    class Config:
+        from_attributes = True
