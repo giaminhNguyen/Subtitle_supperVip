@@ -22,6 +22,9 @@ def request_timeout() -> httpx.Timeout:
 class YouTubeError(RuntimeError): pass
 
 
+class PlaylistNotFoundError(YouTubeError): pass
+
+
 class YouTubeHTTPError(YouTubeError):
     def __init__(self, status: int, message: str, reason: str = "", retry_after: float | None = None):
         super().__init__(message)
@@ -100,15 +103,18 @@ class YouTubeDataClient:
         avatar = (thumbs.get("high") or thumbs.get("default") or {}).get("url")
         return ResolvedChannel(item["id"], item["snippet"]["title"], avatar, item["contentDetails"]["relatedPlaylists"]["uploads"])
 
-    def list_uploads(self, uploads_playlist_id: str):
+    def list_upload_pages(self, uploads_playlist_id: str):
+        """Yield one list per playlist page, newest first: [{"youtube_video_id", "metadata" (None if private/deleted)}]."""
         token = None
         while True:
-            response = self._get("playlistItems", {"part": "snippet,contentDetails", "playlistId": uploads_playlist_id, "maxResults": 50, **({"pageToken": token} if token else {})})
+            try:
+                response = self._get("playlistItems", {"part": "contentDetails", "playlistId": uploads_playlist_id, "maxResults": 50, **({"pageToken": token} if token else {})})
+            except YouTubeHTTPError as exc:
+                if exc.status == 404 and exc.reason == "playlistNotFound": raise PlaylistNotFoundError(str(exc)) from None
+                raise
             ids = [x["contentDetails"]["videoId"] for x in response.get("items", []) if x.get("contentDetails", {}).get("videoId")]
             details = self._video_details(ids)
-            for entry in response.get("items", []):
-                video_id = entry["contentDetails"].get("videoId")
-                if video_id and video_id in details: yield details[video_id]
+            yield [{"youtube_video_id": video_id, "metadata": details.get(video_id)} for video_id in ids]
             token = response.get("nextPageToken")
             if not token: break
 

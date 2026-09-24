@@ -6,11 +6,12 @@ one guarded DB transaction that first proves ownership, then writes every result
 import json, logging, time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from sqlalchemy import select, update
+from sqlalchemy import select
 from .config import settings
 from .database import SessionLocal
-from .models import Channel, Job, JobLog, JobStatus, Subtitle, SyncRun, Video, VideoStatus
-from .services.jobs import due_channel_syncs, scan_channel
+from .models import Channel, Job, JobLog, JobStatus, Subtitle, SyncRun, SyncRunStatus, Video, VideoStatus
+from .services.jobs import ScanResult, apply_scan_result, due_channel_syncs, scan_channel
+from .services.syncruns import refresh_sync_run_state
 from .services.queue import Heartbeat, LostOwnership, claim_next_job, guard_job, new_worker_id, recover_stale_jobs
 from .services.storage import atomic_write_text, to_stored_path
 from .services.subtitles import BlockedByYouTube, LanguageUnavailable, SubtitleUnavailable, fetch_selected, serialize, video_folder
@@ -71,45 +72,52 @@ def process_one() -> bool:
 
 def _run_job(db, job: Job):
     """Raises LostOwnership when this claim is no longer the owner at any guarded write."""
-    job_id, attempts, max_attempts, run_id, video_id = job.id, job.attempts, job.max_attempts, job.payload.get("sync_run_id"), job.video_id  # snapshot: rollbacks expire ORM state
+    job_id, attempts, max_attempts, video_id = job.id, job.attempts, job.max_attempts, job.video_id  # snapshot: rollbacks expire ORM state
+    run_id = job.sync_run_id
     now = datetime.utcnow
     def guard(**values): guard_job(db, job_id, WORKER_ID, attempts, **values)
-    def count(column: str):
-        if run_id: db.execute(update(SyncRun).where(SyncRun.id == run_id).values({column: getattr(SyncRun, column) + 1}))
-    def finalize(apply=None, **values):
-        """One transaction: ownership CAS first, then every result write, then commit."""
-        guard(worker_id=None, lease_expires_at=None, **values)
-        if apply: apply()
-        db.commit()
     def log_job(message: str, level: str = "info"): db.add(JobLog(job_id=job_id, message=message, level=level))
     def video_row(): return db.get(Video, video_id) if video_id else None
+    def finalize(apply=None, **values):
+        """One transaction: ownership CAS first, then every result write, then the SyncRun refresh, then commit."""
+        guard(worker_id=None, lease_expires_at=None, **values)
+        if apply: apply()
+        db.flush()
+        refresh_sync_run_state(db, run_id)
+        db.commit()
 
     try:
         result = None
-        if job.kind == "scan": scan_channel(db, db.get(Channel, job.channel_id), job.payload.get("mode", "new"), job.payload.get("since"), checkpoint=guard)
+        if job.kind == "scan":
+            if not run_id:  # first attempt (or a job queued before SyncRun linkage existed); a retry reuses the same run
+                run = SyncRun(channel_id=job.channel_id, mode=job.payload.get("mode", "new"), status=SyncRunStatus.scanning.value); db.add(run); db.flush()  # row must exist before the job FK points at it
+                guard(sync_run_id=run.id); db.commit(); run_id = run.id
+            channel = db.get(Channel, job.channel_id)
+            result = scan_channel(db, channel, job.payload.get("mode", "new"), job.payload.get("since"), checkpoint=guard, run_id=run_id)
         elif job.kind == "download": result = process_download(db, job)
         else: raise RuntimeError(f"Loại job không hỗ trợ: {job.kind}")
         def done():
             if isinstance(result, DownloadResult): apply_download_result(db, video_id, result)
-            if job.kind == "download": count("successful")
+            if isinstance(result, ScanResult):
+                apply_scan_result(db, channel, result); log_job(result.summary(channel.title, job.payload.get("mode", "new")))
             log_job("Hoàn tất")
-        finalize(done, status=JobStatus.completed, finished_at=now(), error=None)
+        finalize(done, status=JobStatus.completed, finished_at=now(), error=None, outcome="success" if job.kind == "download" else None)
     except LostOwnership: raise
     except SubtitleUnavailable as exc:
         db.rollback()
         def apply():
-            v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.no_subtitle, str(exc), now(); count("no_subtitle"); log_job("Video không có subtitle")
-        finalize(apply, status=JobStatus.completed, finished_at=now(), error=str(exc))
+            v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.no_subtitle, str(exc), now(); log_job("Video không có subtitle")
+        finalize(apply, status=JobStatus.completed, finished_at=now(), error=str(exc), outcome="no_subtitle")
     except LanguageUnavailable as exc:
         db.rollback()
         def apply():
             v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.language_unavailable, str(exc), now(); log_job("Không có ngôn ngữ yêu cầu")
-        finalize(apply, status=JobStatus.completed, finished_at=now(), error=str(exc))
+        finalize(apply, status=JobStatus.completed, finished_at=now(), error=str(exc), outcome="language_unavailable")
     except BlockedByYouTube as exc:
         db.rollback()
         def apply():
             v = video_row(); v.status, v.last_error = VideoStatus.blocked, str(exc); log_job("YouTube đã chặn request", "error")
-        finalize(apply, status=JobStatus.failed, finished_at=now(), error=str(exc))
+        finalize(apply, status=JobStatus.failed, finished_at=now(), error=str(exc), outcome="blocked")
     except Exception as exc:
         db.rollback()
         error = f"{type(exc).__name__}: {exc}"
@@ -118,13 +126,13 @@ def _run_job(db, job: Job):
                 v = video_row()
                 if v: v.retry_count, v.last_error, v.last_processed_at, v.status = v.retry_count + 1, error, now(), VideoStatus.queued
                 log_job(f"Lỗi tạm thời; thử lại: {error}", "warning")
-            finalize(apply, status=JobStatus.queued, error=error, scheduled_at=now() + timedelta(seconds=min(300, 2 ** attempts * 5)))
+            finalize(apply, status=JobStatus.queued, error=error, outcome=None, scheduled_at=now() + timedelta(seconds=min(300, 2 ** attempts * 5)))
         else:
             def apply():
                 v = video_row()
                 if v: v.retry_count, v.last_error, v.last_processed_at, v.status = v.retry_count + 1, error, now(), VideoStatus.failed
-                count("failed"); log_job(f"Thất bại: {error}", "error")
-            finalize(apply, status=JobStatus.failed, finished_at=now(), error=error)
+                log_job(f"Thất bại: {error}", "error")
+            finalize(apply, status=JobStatus.failed, finished_at=now(), error=error, outcome="failed" if job.kind == "download" else None)
 
 
 def worker_loop(process=process_one, sleep=time.sleep, poll_seconds: float | None = None, should_stop=lambda: False):

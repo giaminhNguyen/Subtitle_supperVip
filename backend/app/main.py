@@ -8,6 +8,7 @@ from .database import get_db
 from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Video, VideoStatus
 from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut, YouTubeApiKeyUpdate
 from .services.jobs import enqueue
+from .services.syncruns import refresh_sync_run_state
 from .services.runtime_settings import set_youtube_api_key, youtube_api_key_configured
 from .services.youtube import YouTubeDataClient, YouTubeError
 from .services.subtitles import BlockedByYouTube, SubtitleUnavailable, available_transcripts
@@ -62,7 +63,7 @@ def create_channel(body: ChannelCreate, db: Session = Depends(get_db)):
     except (ValueError, YouTubeError) as exc: raise HTTPException(422, str(exc))
     existing = db.scalar(select(Channel).where(Channel.youtube_channel_id == resolved.channel_id))
     if existing: return existing
-    channel = Channel(youtube_channel_id=resolved.channel_id, url=body.url.strip(), title=resolved.title, avatar_url=resolved.avatar_url)
+    channel = Channel(youtube_channel_id=resolved.channel_id, url=body.url.strip(), title=resolved.title, avatar_url=resolved.avatar_url, uploads_playlist_id=resolved.uploads_playlist_id)
     channel.settings = ChannelSettings(); db.add(channel); db.commit(); db.refresh(channel)
     return channel
 
@@ -155,8 +156,9 @@ def control_job(job_id: str, action: str, db: Session = Depends(get_db)):
     if action == "pause" and job.status == JobStatus.queued: job.status = JobStatus.paused
     elif action == "resume" and job.status == JobStatus.paused: job.status = JobStatus.queued
     elif action == "cancel" and job.status in [JobStatus.queued, JobStatus.paused]: job.status = JobStatus.cancelled
-    elif action == "retry" and job.status == JobStatus.failed: job.status, job.attempts, job.scheduled_at, job.error, job.worker_id, job.lease_expires_at = JobStatus.queued, 0, datetime.utcnow(), None, None, None
+    elif action == "retry" and job.status == JobStatus.failed: job.status, job.attempts, job.scheduled_at, job.error, job.worker_id, job.lease_expires_at, job.outcome = JobStatus.queued, 0, datetime.utcnow(), None, None, None, None
     else: raise HTTPException(409, "Không thể thực hiện thao tác với trạng thái hiện tại")
+    db.flush(); refresh_sync_run_state(db, job.sync_run_id)  # pause/cancel/retry change what the run is waiting for
     db.commit(); return job
 
 

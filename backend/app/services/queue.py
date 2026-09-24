@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Job, JobStatus
 from .jobs import log
+from .syncruns import refresh_sync_run_state
 
 logger = logging.getLogger("app.queue")
 
@@ -50,7 +51,7 @@ def recover_stale_jobs(db: Session, now: datetime | None = None) -> int:
     recovered = 0
     for job in stale:
         exhausted = job.attempts >= job.max_attempts
-        values = dict(status=JobStatus.failed, finished_at=now, error="Worker dừng đột ngột và đã hết số lần thử") if exhausted else dict(status=JobStatus.queued, scheduled_at=now)
+        values = dict(status=JobStatus.failed, finished_at=now, error="Worker dừng đột ngột và đã hết số lần thử", outcome="failed" if job.kind == "download" else None) if exhausted else dict(status=JobStatus.queued, scheduled_at=now)
         # Re-check the lease in the WHERE clause: a heartbeat may have renewed it since the SELECT.
         result = db.execute(update(Job).where(Job.id == job.id, Job.status == JobStatus.processing, (Job.lease_expires_at.is_(None)) | (Job.lease_expires_at < now)).values(worker_id=None, lease_expires_at=None, **values).execution_options(synchronize_session=False))
         if result.rowcount == 1:
@@ -60,6 +61,9 @@ def recover_stale_jobs(db: Session, now: datetime | None = None) -> int:
                 from ..models import Video, VideoStatus
                 video = db.get(Video, job.video_id)
                 if video: video.status = VideoStatus.failed
+    db.flush()
+    for run_id in {job.sync_run_id for job in stale if job.sync_run_id}:  # jobs failed above may close their run
+        refresh_sync_run_state(db, run_id)
     db.commit()
     return recovered
 

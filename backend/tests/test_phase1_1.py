@@ -28,7 +28,7 @@ def make_download_job(engine):
     video = Video(channel=channel, youtube_video_id="abc", title="T", url="u", published_at=datetime(2025, 3, 1))
     s.add(video); s.commit()
     run = SyncRun(channel_id=channel.id, mode="new"); s.add(run); s.commit()
-    job = Job(kind="download", channel_id=channel.id, video_id=video.id, payload={"sync_run_id": run.id}); s.add(job); s.commit()
+    job = Job(kind="download", channel_id=channel.id, video_id=video.id, sync_run_id=run.id); s.add(job); s.commit()
     return s, job.id, video.id, run.id
 
 
@@ -94,10 +94,10 @@ def test_scan_stops_writing_once_ownership_is_lost(shared_db, monkeypatch):
     job = Job(kind="scan", channel_id=channel.id, payload={"mode": "new"}); s.add(job); s.commit(); job_id = job.id
     class FakeClient:
         def resolve_channel(self, _): return type("R", (), {"uploads_playlist_id": "UU"})()
-        def list_uploads(self, _):
+        def list_upload_pages(self, _):
             for n in range(3):
                 if n == 1: worker_b_takes_over(shared_db)  # lease lost while "fetching" page 2
-                yield {"youtube_video_id": f"v{n}", "title": "t", "url": "u", "published_at": datetime(2025, 1, 1), "duration_seconds": 1, "thumbnail_url": None, "video_type": "video"}
+                yield [{"youtube_video_id": f"v{n}", "metadata": {"youtube_video_id": f"v{n}", "title": "t", "url": "u", "published_at": datetime(2025, 1, 1), "duration_seconds": 1, "thumbnail_url": None, "video_type": "video"}}]
     monkeypatch.setattr(jobs_service, "YouTubeDataClient", FakeClient)
     assert worker.process_one()
     s.expire_all()

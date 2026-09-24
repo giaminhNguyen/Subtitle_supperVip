@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -24,6 +24,13 @@ class JobStatus(str, enum.Enum):
     queued = "queued"; processing = "processing"; paused = "paused"; completed = "completed"; failed = "failed"; cancelled = "cancelled"
 
 
+class SyncRunStatus(str, enum.Enum):
+    scanning = "scanning"; downloading = "downloading"; completed = "completed"; partial = "partial"; failed = "failed"
+
+
+ACTIVE_JOB_SQL = "status IN ('queued','processing','paused')"
+
+
 class Channel(Base):
     __tablename__ = "channels"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -35,6 +42,11 @@ class Channel(Base):
     last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     video_count: Mapped[int] = mapped_column(Integer, default=0)
+    uploads_playlist_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Incremental sync state: cursor = newest playlist entry at the last verified scan;
+    # history_complete_at = when a scan last verified that every older upload is in the DB.
+    sync_cursor_video_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    history_complete_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     settings: Mapped["ChannelSettings"] = relationship(back_populates="channel", uselist=False, cascade="all, delete-orphan")
     videos: Mapped[list["Video"]] = relationship(back_populates="channel", cascade="all, delete-orphan")
 
@@ -53,7 +65,7 @@ class ChannelSettings(Base):
 
 class Video(Base):
     __tablename__ = "videos"
-    __table_args__ = (UniqueConstraint("channel_id", "youtube_video_id", name="uq_channel_video"),)
+    __table_args__ = (UniqueConstraint("channel_id", "youtube_video_id", name="uq_channel_video"), Index("ix_videos_channel_published", "channel_id", "published_at"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     channel_id: Mapped[str] = mapped_column(ForeignKey("channels.id"), index=True)
     youtube_video_id: Mapped[str] = mapped_column(String(32), index=True)
@@ -90,6 +102,12 @@ class Subtitle(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_claim", "status", "scheduled_at", "created_at"),
+        # At most one active job per download target / per channel scan (partial unique indexes).
+        Index("uq_active_job_video", "kind", "video_id", unique=True, sqlite_where=text(f"video_id IS NOT NULL AND {ACTIVE_JOB_SQL}")),
+        Index("uq_active_job_channel", "kind", "channel_id", unique=True, sqlite_where=text(f"video_id IS NULL AND {ACTIVE_JOB_SQL}")),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     kind: Mapped[str] = mapped_column(String(32)) # scan, download
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.queued, index=True)
@@ -105,6 +123,8 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     worker_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sync_run_id: Mapped[str | None] = mapped_column(ForeignKey("sync_runs.id"), nullable=True, index=True)
+    outcome: Mapped[str | None] = mapped_column(String(24), nullable=True)  # success/no_subtitle/language_unavailable/blocked/failed once terminal
 
 
 class AppSetting(Base):
@@ -125,7 +145,12 @@ class JobLog(Base):
 
 
 class SyncRun(Base):
+    """One channel sync = the scan job plus every download job it spawned (jobs.sync_run_id).
+
+    Counters and status are a snapshot derived from those jobs by services/syncruns.refresh_sync_run_state.
+    """
     __tablename__ = "sync_runs"
+    __table_args__ = (Index("ix_sync_runs_channel_status", "channel_id", "status"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     channel_id: Mapped[str] = mapped_column(ForeignKey("channels.id"), index=True)
     mode: Mapped[str] = mapped_column(String(20))
@@ -136,3 +161,6 @@ class SyncRun(Base):
     successful: Mapped[int] = mapped_column(Integer, default=0)
     no_subtitle: Mapped[int] = mapped_column(Integer, default=0)
     failed: Mapped[int] = mapped_column(Integer, default=0)
+    language_unavailable: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default=SyncRunStatus.scanning.value)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

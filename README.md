@@ -51,6 +51,13 @@ Không truyền key trực tiếp trên command line vì có thể bị lưu và
 
 Ứng dụng nhận các dạng URL `@handle`, `/channel/ID`, `/user/...` và custom URL. Chỉ video công khai được YouTube Data API trả về mới được quét.
 
+### Đồng bộ kênh
+
+- **Sync new** (và lịch tự động) chỉ quét các video mới nhất: duyệt playlist uploads từ mới đến cũ và dừng khi gặp lại video mốc đã lưu cộng thêm một dải video đã biết (`SYNC_SAFETY_WINDOW`, mặc định 20). Lần đồng bộ đầu tiên của kênh (hoặc kênh cũ chưa có mốc, hoặc mốc không còn trong playlist) sẽ tự quét toàn bộ lịch sử một lần rồi mới dùng chế độ nhanh.
+- **Quét toàn bộ** luôn duyệt hết playlist, không dừng sớm; dùng nó nếu nghi ngờ bị sót video.
+- `uploads_playlist_id` được lưu sau lần resolve đầu tiên; nếu YouTube báo playlist không còn tồn tại, ứng dụng resolve lại đúng một lần.
+- Mỗi lần đồng bộ là một *SyncRun* gồm job quét và mọi job tải do nó tạo ra. Run chỉ kết thúc (`completed`/`partial`/`failed`) khi tất cả job con đã ở trạng thái cuối; số liệu luôn được tính lại từ trạng thái job nên retry/khởi động lại không làm đếm trùng.
+
 ## Cấu trúc dữ liệu portable
 
 Mọi dữ liệu runtime đều nằm trong thư mục dự án, vì vậy có thể di chuyển hoặc clone dự án đến vị trí khác:

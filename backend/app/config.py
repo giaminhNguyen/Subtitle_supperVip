@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     max_job_attempts: int = 5
     request_max_attempts: int = 4  # 1 try + 3 retries for transient external errors
+    sync_safety_window: int = 20  # known videos required after the cursor before an incremental scan may stop
     request_timeout_seconds: float = 30  # per-operation timeout for every outbound HTTP call
     job_lease_seconds: int = 300  # a worker that stops heartbeating loses its job after this
     job_max_runtime_seconds: int = 10800  # heartbeat stops renewing the lease after this, so a hung job is always reclaimable
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
         # (e.g. SQLite busy_timeout of 5s) without another worker reclaiming a live job.
         if self.job_lease_seconds < 30: raise ValueError("JOB_LEASE_SECONDS phải >= 30")
         if self.job_max_runtime_seconds <= self.job_lease_seconds: raise ValueError("JOB_MAX_RUNTIME_SECONDS phải lớn hơn JOB_LEASE_SECONDS")
+        if self.sync_safety_window < 1: raise ValueError("SYNC_SAFETY_WINDOW phải >= 1")
         if self.request_timeout_seconds <= 0 or self.request_max_attempts < 1: raise ValueError("REQUEST_TIMEOUT_SECONDS/REQUEST_MAX_ATTEMPTS không hợp lệ")
         return self
 
