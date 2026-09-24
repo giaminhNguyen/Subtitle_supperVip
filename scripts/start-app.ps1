@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8  # show the Vietnamese messages of app.dbtools correctly
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'
 $logDir = Join-Path $runtimeDir 'logs'

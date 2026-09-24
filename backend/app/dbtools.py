@@ -283,6 +283,9 @@ def rotate_logs(log_dir: Path | None = None, retention_days: int | None = None, 
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # the launcher decodes our output as UTF-8
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(prog="python -m app.dbtools")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("pre-migrate", "backup", "list", "rotate-logs"):

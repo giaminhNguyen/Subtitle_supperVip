@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8  # show the Vietnamese messages of app.dbtools correctly
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $backend = Join-Path $projectRoot 'backend'
 $venvPython = Join-Path $backend '.venv\Scripts\python.exe'

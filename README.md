@@ -6,7 +6,7 @@
 
 Yêu cầu duy nhất cần cài trước:
 
-- Python 3.12 trở lên, chọn **Add Python to PATH** khi cài.
+- Python 3.12 trở lên (bản khóa được sinh trên Python 3.13), chọn **Add Python to PATH** khi cài.
 - Node.js 22 trở lên.
 
 Sau khi clone hoặc giải nén dự án, chỉ cần bấm đúp:
@@ -106,6 +106,34 @@ Không đặt đường dẫn tuyệt đối như `E:\...` trong cấu hình. La
 | Quét/tải không chạy | Bảo đảm `start-app.bat` đã chạy; worker ghi log tại `.runtime\logs\worker.err.log`. |
 | `blocked` | YouTube có thể giới hạn IP. Giảm `REQUESTS_PER_MINUTE`, chờ rồi thử lại. |
 | Không có subtitle | Video có thể không có caption, bị private/removed/age-restricted hoặc tác giả tắt transcript. |
+
+## Phát triển, kiểm thử và CI
+
+Dependency được khóa để cài đặt lặp lại được:
+
+| Phần | File nguồn (sửa tay) | Bản khóa (sinh ra, không sửa tay) |
+| --- | --- | --- |
+| Backend runtime | `backend/requirements.in` | `backend/requirements.txt` (Python 3.13) |
+| Backend dev/CI | `backend/requirements-dev.in` | `backend/requirements-dev.txt` |
+| Frontend | `frontend/package.json` (version cố định) | `frontend/package-lock.json` |
+
+`start-app.bat` cài Python theo `requirements.txt` và frontend bằng `npm ci`; dependency chỉ được cài lại khi hash của `requirements.txt` hoặc của `package.json` + `package-lock.json` thay đổi. Docker cũng dùng `pip install -r requirements.txt` và `npm ci`.
+
+Kiểm tra trước khi commit (CI chạy đúng các lệnh này trên GitHub Actions):
+
+```powershell
+cd backend
+pip install -r requirements-dev.txt
+ruff check . ; ruff format --check . ; pytest -q
+
+cd ..\frontend
+npm ci
+npm run lint ; npm run format:check ; npm run typecheck ; npm test ; npm run build
+```
+
+Sửa format tự động: `ruff format .` (backend) và `npm run format` (frontend).
+
+**Cập nhật dependency**: sửa file `.in` (backend) hoặc `package.json`, cài vào môi trường sạch, chạy test, rồi sinh lại bản khóa (`pip freeze` trong venv sạch cho backend; `npm install` cho frontend) và commit cùng nhau.
 
 ## Chạy thủ công cho phát triển
 
