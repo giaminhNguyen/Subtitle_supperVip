@@ -55,10 +55,11 @@ if (-not (Test-Path $requirementsStamp) -or (Get-Content $requirementsStamp -Raw
     Assert-LastExit 'Cai Python dependencies'
     Set-Content -Path $requirementsStamp -Value $requirementsHash -NoNewline
 }
-$packageHash = (Get-FileHash (Join-Path $frontend 'package.json')).Hash
+# Both files matter: package.json says what we want, package-lock.json says exactly which versions.
+$packageHash = (Get-FileHash (Join-Path $frontend 'package.json')).Hash + (Get-FileHash (Join-Path $frontend 'package-lock.json')).Hash
 $packageStamp = Join-Path $runtimeDir 'package.sha256'
 if (-not (Test-Path (Join-Path $frontend 'node_modules')) -or -not (Test-Path $packageStamp) -or (Get-Content $packageStamp -Raw).Trim() -ne $packageHash) {
-    Push-Location $frontend; npm install; Assert-LastExit 'Cai frontend dependencies'; Pop-Location
+    Push-Location $frontend; npm ci; Assert-LastExit 'Cai frontend dependencies (npm ci theo package-lock.json)'; Pop-Location
     Set-Content -Path $packageStamp -Value $packageHash -NoNewline
 }
 

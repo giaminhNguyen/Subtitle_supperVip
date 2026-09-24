@@ -1,4 +1,5 @@
 import pytest
+
 from app.services.subtitles import LanguageUnavailable, choose_transcript, serialize
 
 

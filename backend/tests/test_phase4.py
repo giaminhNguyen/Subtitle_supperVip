@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from test_phase1 import new_session
 
 from app import main
 from app.models import Channel, ChannelSettings, Job, JobLog, JobStatus, Subtitle, Video
-from test_phase1 import new_session, shared_db  # noqa: F401 (fixture)
 
 BASE = datetime(2026, 1, 1)
 
@@ -49,7 +49,7 @@ def test_channel_videos_paginate_and_language_filter_does_not_duplicate_rows(sha
 
 def test_logs_paginate_and_filter_by_job(shared_db):
     seed_channel(shared_db, jobs=1, logs=4); client = TestClient(main.app)
-    response = client.get("/api/logs?limit=3"); assert response.headers["X-Total-Count"] == "4" and [l["id"] for l in response.json()] == ["log003", "log002", "log001"]
+    response = client.get("/api/logs?limit=3"); assert response.headers["X-Total-Count"] == "4" and [entry["id"] for entry in response.json()] == ["log003", "log002", "log001"]
     assert client.get("/api/logs?job_id=job000").headers["X-Total-Count"] == "0"
 
 

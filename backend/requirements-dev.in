@@ -1,0 +1,4 @@
+# Development/CI tools on top of the runtime lock.
+-c requirements.txt
+pytest>=8,<10
+ruff>=0.6

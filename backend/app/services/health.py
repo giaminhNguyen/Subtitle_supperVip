@@ -9,8 +9,8 @@ from datetime import datetime
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from ..config import PROJECT_ROOT, RUNTIME_LOG_DIR, settings
-from ..models import Channel, Job, JobStatus, SyncRun, SyncRunStatus
+from ..config import RUNTIME_LOG_DIR, settings
+from ..models import Job, JobStatus, SyncRun, SyncRunStatus
 from .runtime_settings import youtube_api_key_configured
 from .workers import worker_summary
 

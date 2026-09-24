@@ -10,5 +10,10 @@ export function StatusPill({ onOpen }: { onOpen: () => void }) {
   const status = data?.status ?? 'degraded';
   const worker = data?.worker?.status;
   const title = data ? `API: ${data.api} · DB: ${data.database} · worker: ${worker ?? '?'}` : 'Đang kiểm tra…';
-  return <button className={`api status-${status}`} title={title} onClick={onOpen}>{data ? LABEL[status] : 'Đang kiểm tra…'}{worker && worker !== 'running' ? ' · worker offline' : ''}</button>;
+  return (
+    <button className={`api status-${status}`} title={title} onClick={onOpen}>
+      {data ? LABEL[status] : 'Đang kiểm tra…'}
+      {worker && worker !== 'running' ? ' · worker offline' : ''}
+    </button>
+  );
 }

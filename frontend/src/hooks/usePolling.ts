@@ -31,8 +31,12 @@ export function usePolling<T>(fetcher: (signal: AbortSignal) => Promise<T>, inte
   const intervalRef = useRef(interval);
   const dataRef = useRef<T | undefined>(undefined);
   const refreshRef = useRef<() => void>(() => undefined);
-  fetcherRef.current = fetcher;
-  intervalRef.current = interval;
+  // Keep the latest callbacks reachable from the long-lived poll loop. Declared before the polling effect so
+  // it has already run when the first request starts.
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+    intervalRef.current = interval;
+  });
 
   useEffect(() => {
     let stopped = false;
@@ -41,22 +45,38 @@ export function usePolling<T>(fetcher: (signal: AbortSignal) => Promise<T>, inte
     let timer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
 
-    const clear = () => { if (timer !== undefined) { clearTimeout(timer); timer = undefined; } };
+    const clear = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
     const schedule = () => {
       clear();
       if (stopped || document.hidden) return;
       const current = intervalRef.current;
       const ms = typeof current === 'function' ? current(dataRef.current) : current;
-      if (ms !== null && ms !== undefined) timer = setTimeout(() => { timer = undefined; void tick(); }, ms);
+      if (ms !== null && ms !== undefined)
+        timer = setTimeout(() => {
+          timer = undefined;
+          void tick();
+        }, ms);
     };
     const tick = async () => {
       if (stopped) return;
-      if (inflight) { queued = true; return; } // coalesce: run once more right after the current request
+      if (inflight) {
+        queued = true;
+        return;
+      } // coalesce: run once more right after the current request
       inflight = true;
       setRefreshing(true);
       try {
         const value = await fetcherRef.current(controller.signal);
-        if (!stopped) { dataRef.current = value; setData(value); setError(null); }
+        if (!stopped) {
+          dataRef.current = value;
+          setData(value);
+          setError(null);
+        }
       } catch (caught) {
         if (!stopped && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : String(caught));
       } finally {
@@ -64,7 +84,10 @@ export function usePolling<T>(fetcher: (signal: AbortSignal) => Promise<T>, inte
         if (!stopped) {
           setLoading(false);
           setRefreshing(false);
-          if (queued) { queued = false; void tick(); } else schedule();
+          if (queued) {
+            queued = false;
+            void tick();
+          } else schedule();
         }
       }
     };
@@ -73,7 +96,10 @@ export function usePolling<T>(fetcher: (signal: AbortSignal) => Promise<T>, inte
       else if (!inflight) void tick();
     };
 
-    refreshRef.current = () => { clear(); void tick(); };
+    refreshRef.current = () => {
+      clear();
+      void tick();
+    };
     document.addEventListener('visibilitychange', onVisibility);
     void tick();
     return () => {

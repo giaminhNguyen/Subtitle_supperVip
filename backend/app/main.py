@@ -1,20 +1,22 @@
 from datetime import datetime
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+
 from .config import settings
 from .database import SessionLocal, get_db
 from .models import Channel, ChannelSettings, Job, JobLog, JobStatus, Subtitle, Video, VideoStatus
 from .schemas import ChannelCreate, ChannelOut, ChannelSettingsUpdate, ScanRequest, VideoOut, YouTubeApiKeyUpdate
-from .services.jobs import enqueue
 from .services.health import diagnostics, health_summary
-from .services.syncruns import refresh_sync_run_state
+from .services.jobs import enqueue
 from .services.runtime_settings import set_youtube_api_key, youtube_api_key_configured
-from .services.youtube import YouTubeDataClient, YouTubeError
 from .services.subtitles import BlockedByYouTube, SubtitleUnavailable, available_transcripts
+from .services.syncruns import refresh_sync_run_state
+from .services.youtube import YouTubeDataClient, YouTubeError
 
 app = FastAPI(title="YouTube Subtitle Manager", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Total-Count"])
@@ -63,7 +65,7 @@ def update_youtube_config(body: YouTubeApiKeyUpdate):
     try:
         set_youtube_api_key(body.api_key)
     except ValueError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
     return {"configured": True}
 
 
@@ -80,7 +82,7 @@ def dashboard(db: Session = Depends(get_db)):
 @app.post("/api/channels", response_model=ChannelOut, status_code=201)
 def create_channel(body: ChannelCreate, db: Session = Depends(get_db)):
     try: resolved = YouTubeDataClient().resolve_channel(body.url)
-    except (ValueError, YouTubeError) as exc: raise HTTPException(422, str(exc))
+    except (ValueError, YouTubeError) as exc: raise HTTPException(422, str(exc)) from exc
     existing = db.scalar(select(Channel).where(Channel.youtube_channel_id == resolved.channel_id))
     if existing: return existing
     channel = Channel(youtube_channel_id=resolved.channel_id, url=body.url.strip(), title=resolved.title, avatar_url=resolved.avatar_url, uploads_playlist_id=resolved.uploads_playlist_id)
@@ -143,9 +145,9 @@ def available_subtitles(video_id: str, db: Session = Depends(get_db)):
     except SubtitleUnavailable:
         return []
     except BlockedByYouTube as exc:
-        raise HTTPException(429, f"YouTube có thể đã chặn IP: {exc}")
+        raise HTTPException(429, f"YouTube có thể đã chặn IP: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(502, f"Không thể kiểm tra subtitle: {exc}")
+        raise HTTPException(502, f"Không thể kiểm tra subtitle: {exc}") from exc
 
 
 @app.post("/api/videos/{video_id}/download", status_code=202)
@@ -186,7 +188,7 @@ def control_job(job_id: str, action: str, db: Session = Depends(get_db)):
         db.flush(); refresh_sync_run_state(db, job.sync_run_id)  # pause/cancel/retry change what the run is waiting for
         db.commit()
     except IntegrityError:  # lost a race with another active job for the same target (partial unique index)
-        db.rollback(); raise HTTPException(409, "Đã có job đang hoạt động cho mục này")
+        db.rollback(); raise HTTPException(409, "Đã có job đang hoạt động cho mục này") from None
     return job
 
 

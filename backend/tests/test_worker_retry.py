@@ -1,9 +1,10 @@
 from datetime import datetime
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+
+from app import worker
 from app.database import Base
 from app.models import Job, JobStatus
-from app import worker
 
 
 def test_temporary_failure_is_requeued_with_backoff(tmp_path, monkeypatch):

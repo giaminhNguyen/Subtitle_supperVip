@@ -5,19 +5,17 @@ from pathlib import Path
 import httpx
 import pytest
 import requests
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import sessionmaker
+from test_phase1 import TIMEOUTS, FakeClock, FakeResponse, add_job, get, new_session, script_httpx
 
+from alembic import command
 from app import worker
 from app.config import Settings, settings
 from app.models import Channel, ChannelSettings, Job, JobLog, JobStatus, Subtitle, SyncRun, Video, VideoStatus
 from app.services import jobs as jobs_service
 from app.services import queue, ratelimit, subtitles, youtube
 from app.services.ratelimit import RateLimiter
-from test_phase1 import (TIMEOUTS, FakeClock, FakeResponse, add_job, data_dir, get, new_session, no_wait,  # noqa: F401 (fixtures)
-                         script_httpx, shared_db)
 
 BACKEND = Path(__file__).resolve().parents[1]
 

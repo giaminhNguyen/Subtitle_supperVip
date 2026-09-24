@@ -12,7 +12,11 @@ export function App() {
   const home = () => setRoute({ name: 'channels' });
   return (
     <>
-      {route.name !== 'jobs' && <button className="secondary jobs-button" onClick={() => setRoute({ name: 'jobs' })}>Jobs & logs</button>}
+      {route.name !== 'jobs' && (
+        <button className="secondary jobs-button" onClick={() => setRoute({ name: 'jobs' })}>
+          Jobs & logs
+        </button>
+      )}
       {route.name === 'jobs' && <JobsPage back={home} />}
       {route.name === 'diagnostics' && <DiagnosticsPage back={home} />}
       {route.name === 'channel' && <ChannelPage channel={route.channel} back={home} />}

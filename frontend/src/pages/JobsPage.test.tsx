@@ -7,7 +7,17 @@ import type { Job } from '../types';
 import { DiagnosticsPage, formatBytes, formatUptime } from './DiagnosticsPage';
 import { JobsPage } from './JobsPage';
 
-const job = (overrides: Partial<Job>): Job => ({ id: 'j1', kind: 'download', status: 'failed', attempts: 5, max_attempts: 5, created_at: '2026-01-01T00:00:00', error: 'boom', outcome: 'failed', ...overrides });
+const job = (overrides: Partial<Job>): Job => ({
+  id: 'j1',
+  kind: 'download',
+  status: 'failed',
+  attempts: 5,
+  max_attempts: 5,
+  created_at: '2026-01-01T00:00:00',
+  error: 'boom',
+  outcome: 'failed',
+  ...overrides,
+});
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -16,7 +26,12 @@ describe('JobsPage', () => {
     vi.spyOn(api, 'jobs').mockResolvedValue({ items: [job({})], total: 1 });
     vi.spyOn(api, 'logs').mockResolvedValue({ items: [], total: 0 });
     let finish: (value: Job) => void = () => undefined;
-    const action = vi.spyOn(api, 'jobAction').mockImplementation(() => new Promise<Job>((done) => { finish = done; }));
+    const action = vi.spyOn(api, 'jobAction').mockImplementation(
+      () =>
+        new Promise<Job>((done) => {
+          finish = done;
+        }),
+    );
     render(<JobsPage back={() => undefined} />);
     const button = await screen.findByRole('button', { name: 'Retry' });
     const user = userEvent.setup();
@@ -77,9 +92,13 @@ describe('DiagnosticsPage', () => {
     vi.spyOn(api, 'diagnostics').mockResolvedValue({
       app: { version: '0.1.0', python: '3.13', uptime_seconds: 3700 },
       database: { status: 'ok', engine: 'sqlite', revision: '0004', journal_mode: 'wal', size_bytes: 2048 },
-      storage: { status: 'ok', free_bytes: 5 * 1024 ** 3, total_bytes: 10 * 1024 ** 3 }, runtime_logs: '.runtime/logs',
+      storage: { status: 'ok', free_bytes: 5 * 1024 ** 3, total_bytes: 10 * 1024 ** 3 },
+      runtime_logs: '.runtime/logs',
       queue: { queued: 3, processing: 0, paused: 0, completed: 9, failed: 1, cancelled: 0 },
-      worker: { status: 'offline', active: 0, stale: 1, busy: 0, last_heartbeat: null }, youtube_api_key_configured: true, active_sync_runs: [], last_successful_sync: null,
+      worker: { status: 'offline', active: 0, stale: 1, busy: 0, last_heartbeat: null },
+      youtube_api_key_configured: true,
+      active_sync_runs: [],
+      last_successful_sync: null,
     });
     render(<DiagnosticsPage back={() => undefined} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Worker không hoạt động');
@@ -88,6 +107,9 @@ describe('DiagnosticsPage', () => {
   });
 
   it('formats helpers', () => {
-    expect(formatBytes(null)).toBe('–'); expect(formatBytes(1536)).toBe('1.5 KB'); expect(formatUptime(45)).toBe('0m 45s'); expect(formatUptime(3700)).toBe('1h 1m');
+    expect(formatBytes(null)).toBe('–');
+    expect(formatBytes(1536)).toBe('1.5 KB');
+    expect(formatUptime(45)).toBe('0m 45s');
+    expect(formatUptime(3700)).toBe('1h 1m');
   });
 });

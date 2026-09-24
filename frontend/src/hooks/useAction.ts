@@ -10,12 +10,19 @@ export function useAction() {
   const [notice, setNotice] = useState<string | null>(null);
   const busy = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const run = useCallback(async (key: string, action: () => Promise<unknown>, success?: string): Promise<boolean> => {
     if (busy.current) return false;
     busy.current = true;
-    setBusyKey(key); setError(null); setNotice(null);
+    setBusyKey(key);
+    setError(null);
+    setNotice(null);
     try {
       await action();
       if (mounted.current && success) setNotice(success);
@@ -29,5 +36,15 @@ export function useAction() {
     }
   }, []);
 
-  return { run, busyKey, busy: busyKey !== null, error, notice, clear: () => { setError(null); setNotice(null); } };
+  return {
+    run,
+    busyKey,
+    busy: busyKey !== null,
+    error,
+    notice,
+    clear: () => {
+      setError(null);
+      setNotice(null);
+    },
+  };
 }

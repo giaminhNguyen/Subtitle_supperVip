@@ -1,5 +1,4 @@
 """Runtime settings shared by API and worker through the database (never returned raw by the API)."""
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 

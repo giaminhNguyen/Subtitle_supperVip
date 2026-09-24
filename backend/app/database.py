@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
 from .config import settings
 
 SQLITE_BUSY_TIMEOUT_MS = 5000

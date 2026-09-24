@@ -1,0 +1,19 @@
+# Tool configuration only. Dependencies: requirements.in / requirements.txt (lock), requirements-dev.in / requirements-dev.txt.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 180
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "I"]
+ignore = [
+  "E701", # `if x: return` one-liners are the house style here
+  "E702", # `a = 1; b = 2`
+  "E731", # short lambdas are fine
+  "B008", # FastAPI Depends()/Query() defaults
+]

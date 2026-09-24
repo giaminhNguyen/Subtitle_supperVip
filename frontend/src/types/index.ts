@@ -16,8 +16,16 @@ export type VideoStatus = 'pending' | 'queued' | 'processing' | 'completed' | 'n
 export const VIDEO_STATUSES: VideoStatus[] = ['pending', 'queued', 'processing', 'completed', 'no_subtitle', 'language_unavailable', 'failed', 'blocked', 'skipped'];
 
 export type Video = {
-  id: string; title: string; youtube_video_id: string; published_at?: string | null; video_type: string; status: VideoStatus;
-  retry_count: number; last_error?: string | null; subtitle_path?: string | null; subtitles: Subtitle[];
+  id: string;
+  title: string;
+  youtube_video_id: string;
+  published_at?: string | null;
+  video_type: string;
+  status: VideoStatus;
+  retry_count: number;
+  last_error?: string | null;
+  subtitle_path?: string | null;
+  subtitles: Subtitle[];
 };
 
 export type JobStatus = 'queued' | 'processing' | 'paused' | 'completed' | 'failed' | 'cancelled';
@@ -25,8 +33,17 @@ export const JOB_STATUSES: JobStatus[] = ['queued', 'processing', 'paused', 'com
 export type JobAction = 'pause' | 'resume' | 'cancel' | 'retry';
 
 export type Job = {
-  id: string; kind: string; status: JobStatus; outcome?: string | null; attempts: number; max_attempts: number;
-  error?: string | null; created_at: string; sync_run_id?: string | null; video_id?: string | null; channel_id?: string | null;
+  id: string;
+  kind: string;
+  status: JobStatus;
+  outcome?: string | null;
+  attempts: number;
+  max_attempts: number;
+  error?: string | null;
+  created_at: string;
+  sync_run_id?: string | null;
+  video_id?: string | null;
+  channel_id?: string | null;
 };
 
 export type JobLog = { id: string; job_id?: string | null; level: string; message: string; created_at: string };
@@ -40,8 +57,13 @@ export type PageQuery = { limit: number; offset: number };
 export type WorkerSummary = { status: 'running' | 'offline' | 'absent' | 'unknown'; active: number; stale: number; busy: number; last_heartbeat: string | null };
 
 export type Health = {
-  ok: boolean; status: 'ok' | 'degraded' | 'critical'; api: string; database: string; storage?: string;
-  worker?: WorkerSummary; youtube_api_key_configured?: boolean;
+  ok: boolean;
+  status: 'ok' | 'degraded' | 'critical';
+  api: string;
+  database: string;
+  storage?: string;
+  worker?: WorkerSummary;
+  youtube_api_key_configured?: boolean;
 };
 
 export type SyncRunSummary = { id: string; channel_id: string; mode: string; status: string; started_at: string; queued: number; successful: number; failed: number };

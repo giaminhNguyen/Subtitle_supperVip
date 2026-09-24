@@ -6,9 +6,15 @@ export function Pagination({ offset, limit, total, disabled = false, onChange }:
   const last = Math.min(offset + limit, total);
   return (
     <nav className="pagination" aria-label="Phân trang">
-      <button className="secondary" disabled={disabled || offset <= 0} onClick={() => onChange(Math.max(0, offset - limit))}>← Trước</button>
-      <span>{first}–{last} / {total}</span>
-      <button className="secondary" disabled={disabled || offset + limit >= total} onClick={() => onChange(offset + limit)}>Sau →</button>
+      <button className="secondary" disabled={disabled || offset <= 0} onClick={() => onChange(Math.max(0, offset - limit))}>
+        ← Trước
+      </button>
+      <span>
+        {first}–{last} / {total}
+      </span>
+      <button className="secondary" disabled={disabled || offset + limit >= total} onClick={() => onChange(offset + limit)}>
+        Sau →
+      </button>
     </nav>
   );
 }

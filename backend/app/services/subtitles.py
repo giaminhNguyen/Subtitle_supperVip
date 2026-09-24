@@ -1,8 +1,12 @@
-import csv, json, re
-import requests
+import csv
+import json
+import re
 from io import StringIO
 from pathlib import Path
+
+import requests
 from youtube_transcript_api import YouTubeTranscriptApi
+
 from ..config import settings
 from .ratelimit import call_with_retry
 
@@ -58,8 +62,8 @@ def fetch_selected(video_id: str, languages: list[str], preference: str, allow_t
     except LanguageUnavailable: raise
     except Exception as exc:
         name = exc.__class__.__name__.lower(); message = str(exc).lower()
-        if "ipblocked" in name or "requestblocked" in name or "too many" in message or "429" in message: raise BlockedByYouTube(str(exc))
-        if "notranscript" in name or "transcriptsdisabled" in name: raise SubtitleUnavailable(str(exc))
+        if "ipblocked" in name or "requestblocked" in name or "too many" in message or "429" in message: raise BlockedByYouTube(str(exc)) from exc
+        if "notranscript" in name or "transcriptsdisabled" in name: raise SubtitleUnavailable(str(exc)) from exc
         raise
 
 
@@ -71,8 +75,8 @@ def available_transcripts(video_id: str) -> list[dict]:
                  "is_translatable": t.is_translatable} for t in tracks]
     except Exception as exc:
         name = exc.__class__.__name__.lower(); message = str(exc).lower()
-        if "ipblocked" in name or "requestblocked" in name or "too many" in message or "429" in message: raise BlockedByYouTube(str(exc))
-        if "notranscript" in name or "transcriptsdisabled" in name: raise SubtitleUnavailable(str(exc))
+        if "ipblocked" in name or "requestblocked" in name or "too many" in message or "429" in message: raise BlockedByYouTube(str(exc)) from exc
+        if "notranscript" in name or "transcriptsdisabled" in name: raise SubtitleUnavailable(str(exc)) from exc
         raise
 
 

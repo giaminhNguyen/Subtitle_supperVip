@@ -1,16 +1,16 @@
 """Phase 2: playlist caching, incremental sync, SyncRun lifecycle, idempotent counters, migration 0003."""
-import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from test_phase1 import new_session
+from test_phase1_1 import worker_b_takes_over
 
+from alembic import command
 from app import database, main, worker
 from app.config import settings
 from app.database import make_engine
@@ -19,8 +19,6 @@ from app.services import jobs as jobs_service
 from app.services import queue, subtitles
 from app.services.syncruns import refresh_sync_run_state
 from app.services.youtube import PlaylistNotFoundError
-from test_phase1 import data_dir, new_session, shared_db  # noqa: F401 (fixtures)
-from test_phase1_1 import fake_transcript, worker_b_takes_over
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -212,7 +210,7 @@ def test_failed_scan_does_not_advance_cursor(shared_db, monkeypatch):
 def test_scan_retry_after_failure_reuses_run_and_finishes_correctly(shared_db, monkeypatch):
     ids = [f"v{i}" for i in range(200)]; broken = FakeYouTube(NEW60 + ids, fail_at_page=1)
     install(monkeypatch, broken); s, channel_id = make_channel(shared_db, cursor="v0", complete=True, known=ids)
-    job_id = scan(shared_db, channel_id)
+    scan(shared_db, channel_id)
     s.execute(text("UPDATE jobs SET scheduled_at = :t"), {"t": datetime.utcnow() - timedelta(seconds=1)}); s.commit()
     install(monkeypatch, FakeYouTube(NEW60 + ids)); assert worker.process_one()
     assert len(s.scalars(select(SyncRun)).all()) == 1  # a restart/retry never creates a second run
@@ -221,7 +219,7 @@ def test_scan_retry_after_failure_reuses_run_and_finishes_correctly(shared_db, m
 
 def test_lost_ownership_mid_scan_leaves_cursor_run_and_jobs_alone(shared_db, monkeypatch):
     ids = [f"v{i}" for i in range(200)]
-    fake = install(monkeypatch, FakeYouTube(NEW60 + ids, on_page=lambda n: worker_b_takes_over(shared_db) if n == 2 else None))
+    install(monkeypatch, FakeYouTube(NEW60 + ids, on_page=lambda n: worker_b_takes_over(shared_db) if n == 2 else None))
     s, channel_id = make_channel(shared_db, cursor="v0", complete=True, known=ids)
     job_id = scan(shared_db, channel_id)
     s.expire_all(); job = s.get(Job, job_id)
@@ -236,7 +234,7 @@ def test_large_history_needs_few_requests(shared_db, monkeypatch):
     scan(shared_db, channel_id)
     incremental_pages = fake.pages_fetched
     drain(); fake.pages_fetched = 0
-    make_channel_full = scan(shared_db, channel_id, mode="all")
+    scan(shared_db, channel_id, mode="all")
     assert incremental_pages == 1 and fake.pages_fetched == 101 and only_run_count(s) == 2
 
 
@@ -288,7 +286,7 @@ def test_run_is_scanning_and_unfinished_while_the_scan_is_active(shared_db, monk
 
 def test_failed_scan_run_reflects_failure_after_retries_are_exhausted(shared_db, monkeypatch):
     install(monkeypatch, FakeYouTube(["a"], fail_at_page=0)); s, channel_id = make_channel(shared_db)
-    job_id = scan(shared_db, channel_id)
+    scan(shared_db, channel_id)
     s.execute(text("UPDATE jobs SET attempts = max_attempts - 1")); s.commit()
     s.execute(text("UPDATE jobs SET scheduled_at = :t"), {"t": datetime.utcnow() - timedelta(seconds=1)}); s.commit()
     assert worker.process_one()

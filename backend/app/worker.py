@@ -3,20 +3,24 @@
 Job lifecycle: claim (atomic CAS) -> network + file writes (no DB write lock held) ->
 one guarded DB transaction that first proves ownership, then writes every result, then commits.
 """
-import json, logging, time
+import json
+import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+
 from sqlalchemy import select
+
 from .config import settings
 from .database import SessionLocal
 from .models import Channel, Job, JobLog, JobStatus, Subtitle, SyncRun, SyncRunStatus, Video, VideoStatus
 from .services.jobs import ScanResult, apply_scan_result, due_channel_syncs, scan_channel
-from .services.syncruns import refresh_sync_run_state
+from .services.maintenance import MaintenanceSchedule, run_retention
 from .services.queue import Heartbeat, LostOwnership, claim_next_job, guard_job, new_worker_id, recover_stale_jobs
 from .services.storage import atomic_write_text, to_stored_path
-from .services.maintenance import MaintenanceSchedule, run_retention
-from .services.workers import STATE, HeartbeatThread
 from .services.subtitles import BlockedByYouTube, LanguageUnavailable, SubtitleUnavailable, fetch_selected, serialize, video_folder
+from .services.syncruns import refresh_sync_run_state
+from .services.workers import STATE, HeartbeatThread
 
 WORKER_ID = new_worker_id()
 logger = logging.getLogger("app.worker")
@@ -109,19 +113,22 @@ def _run_job(db, job: Job):
     except LostOwnership: raise
     except SubtitleUnavailable as exc:
         db.rollback()
+        reason = str(exc)
         def apply():
-            v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.no_subtitle, str(exc), now(); log_job("Video không có subtitle")
-        finalize(apply, status=JobStatus.completed, finished_at=now(), error=str(exc), outcome="no_subtitle")
+            v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.no_subtitle, reason, now(); log_job("Video không có subtitle")
+        finalize(apply, status=JobStatus.completed, finished_at=now(), error=reason, outcome="no_subtitle")
     except LanguageUnavailable as exc:
         db.rollback()
+        reason = str(exc)
         def apply():
-            v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.language_unavailable, str(exc), now(); log_job("Không có ngôn ngữ yêu cầu")
-        finalize(apply, status=JobStatus.completed, finished_at=now(), error=str(exc), outcome="language_unavailable")
+            v = video_row(); v.status, v.last_error, v.last_processed_at = VideoStatus.language_unavailable, reason, now(); log_job("Không có ngôn ngữ yêu cầu")
+        finalize(apply, status=JobStatus.completed, finished_at=now(), error=reason, outcome="language_unavailable")
     except BlockedByYouTube as exc:
         db.rollback()
+        reason = str(exc)
         def apply():
-            v = video_row(); v.status, v.last_error = VideoStatus.blocked, str(exc); log_job("YouTube đã chặn request", "error")
-        finalize(apply, status=JobStatus.failed, finished_at=now(), error=str(exc), outcome="blocked")
+            v = video_row(); v.status, v.last_error = VideoStatus.blocked, reason; log_job("YouTube đã chặn request", "error")
+        finalize(apply, status=JobStatus.failed, finished_at=now(), error=reason, outcome="blocked")
     except Exception as exc:
         db.rollback()
         error = f"{type(exc).__name__}: {exc}"

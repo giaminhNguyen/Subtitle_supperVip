@@ -4,40 +4,22 @@ from pathlib import Path
 
 import httpx
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
+from alembic import command
 from app import config, database, worker
 from app.config import settings
-from app.database import Base, make_engine
 from app.models import AppSetting, Job, JobStatus
-from app.services import queue, ratelimit, runtime_settings, storage, youtube
+from app.services import queue, runtime_settings, storage, youtube
 from app.services.ratelimit import RateLimiter, call_with_retry
 
 BACKEND = Path(__file__).resolve().parents[1]
 
 
 # ---------- fixtures ----------
-@pytest.fixture
-def shared_db(tmp_path, monkeypatch):
-    """One SQLite file used through database.SessionLocal, like the API + worker do."""
-    engine = make_engine(f"sqlite:///{tmp_path / 'shared.db'}")
-    Base.metadata.create_all(engine)
-    monkeypatch.setitem(database.SessionLocal.kw, "bind", engine)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def data_dir(tmp_path, monkeypatch):
-    root = tmp_path / "A" / "data"; root.mkdir(parents=True)
-    monkeypatch.setattr(settings, "data_dir", root)
-    return root
-
-
 def new_session(engine):
     return sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -74,15 +56,6 @@ def test_retries_also_count_against_rate_limit():
 class FakeResponse:
     def __init__(self, status, body=None, headers=None): self.status_code = status; self._body = body or {}; self.text = str(self._body); self.headers = headers or {}
     def json(self): return self._body
-
-
-@pytest.fixture
-def no_wait(monkeypatch):
-    sleeps = []
-    monkeypatch.setattr(settings, "requests_per_minute", 0); ratelimit.reset_youtube_limiter()
-    monkeypatch.setattr(ratelimit.time, "sleep", sleeps.append)
-    yield sleeps
-    ratelimit.reset_youtube_limiter()
 
 
 TIMEOUTS = []

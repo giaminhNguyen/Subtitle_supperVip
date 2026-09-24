@@ -1,4 +1,20 @@
-import type { Channel, ChannelDetail, ChannelSettings, DashboardStats, Diagnostics, Health, Job, JobAction, JobLog, JobStatus, Page, PageQuery, Video, VideoStatus, YouTubeConfig } from '../types';
+import type {
+  Channel,
+  ChannelDetail,
+  ChannelSettings,
+  DashboardStats,
+  Diagnostics,
+  Health,
+  Job,
+  JobAction,
+  JobLog,
+  JobStatus,
+  Page,
+  PageQuery,
+  Video,
+  VideoStatus,
+  YouTubeConfig,
+} from '../types';
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 const HEALTH_URL = `${API_BASE.replace(/\/api\/?$/, '')}/health`;
@@ -78,7 +94,9 @@ export const api = {
   /** /health answers 503 with a JSON body when critical; that body is still the answer we want to show. */
   health: async (signal?: AbortSignal): Promise<Health> => {
     let response: Response;
-    try { response = await fetch(HEALTH_URL, { signal }); } catch (error) {
+    try {
+      response = await fetch(HEALTH_URL, { signal });
+    } catch (error) {
       if (isAbortError(error)) throw error;
       return { ok: false, status: 'critical', api: 'unreachable', database: 'unknown' };
     }

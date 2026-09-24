@@ -19,7 +19,7 @@ def to_stored_path(path: Path | str) -> str:
     try:
         return Path(path).resolve().relative_to(_data_root()).as_posix()
     except ValueError:
-        raise UnsafePathError("Đường dẫn nằm ngoài thư mục dữ liệu")
+        raise UnsafePathError("Đường dẫn nằm ngoài thư mục dữ liệu") from None
 
 
 def resolve_subtitle_path(stored: str) -> Path:

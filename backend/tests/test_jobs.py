@@ -1,6 +1,8 @@
 from datetime import datetime
+
 from sqlalchemy import select
-from app.models import Channel, ChannelSettings, Job, JobStatus, Video, VideoStatus
+
+from app.models import Channel, ChannelSettings, Job, Video, VideoStatus
 from app.services import jobs as jobs_service
 
 

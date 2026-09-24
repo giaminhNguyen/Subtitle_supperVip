@@ -1,25 +1,23 @@
 """Phase 3: worker heartbeat, health, diagnostics, backup/restore, retention, scan-failure scheduling."""
-import json
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select, text
+from test_phase1 import new_session
+from test_phase2 import FakeYouTube, install, make_channel, only_run  # noqa: F401
 
+from alembic import command
 from app import database, dbtools, main, worker
 from app.config import Settings, settings
 from app.database import make_engine
 from app.models import Channel, Job, JobLog, JobStatus, SyncRun, Video, WorkerHeartbeat
-from app.services import health, maintenance, runtime_settings, workers
 from app.services import jobs as jobs_service
-from test_phase1 import data_dir, new_session, shared_db  # noqa: F401 (fixtures)
-from test_phase2 import FakeYouTube, install, make_channel, only_run  # noqa: F401
+from app.services import maintenance, runtime_settings, workers
 
 BACKEND = Path(__file__).resolve().parents[1]
 NOW = datetime(2026, 9, 25, 12, 0, 0)
@@ -89,7 +87,8 @@ def test_heartbeat_interval_default_is_not_spammy_and_config_validated():
 
 # ---------- health ----------
 def no_network(monkeypatch):
-    import httpx, requests
+    import httpx
+    import requests
     def boom(*a, **k): raise AssertionError("health/diagnostics must not call the network")
     monkeypatch.setattr(httpx, "get", boom); monkeypatch.setattr(requests.Session, "request", boom)
 
@@ -309,7 +308,7 @@ def test_retention_deletes_only_old_terminal_history(shared_db):
     s.expire_all(); jobs = {j.id for j in s.scalars(select(Job))}; runs = {r.id for r in s.scalars(select(SyncRun))}
     assert runs == {"recent-run", "active-run", "bogus-terminal-run"}
     assert jobs == {"recent-run-j0", "active-run-j0", "active-run-j1", "bogus-terminal-run-j0", "solo-old-queued", "solo-old-proc", "solo-old-paused", "solo-recent-done"}
-    logs = {(l.job_id, l.message) for l in s.scalars(select(JobLog))}
+    logs = {(entry.job_id, entry.message) for entry in s.scalars(select(JobLog))}
     assert (None, "orphan-old") not in logs and (None, "fresh") in logs
     logged = {j for j, _ in logs if j}
     assert logged <= jobs and {"active-run-j0", "bogus-terminal-run-j0", "solo-old-queued", "solo-old-proc", "solo-old-paused"} <= logged  # active jobs keep their logs; none dangle
@@ -363,6 +362,6 @@ def test_manual_scan_failure_does_not_enable_scheduling_and_retry_still_works(sh
 
 def test_successful_scan_schedules_the_normal_interval(shared_db, monkeypatch):
     install(monkeypatch, FakeYouTube(["a"])); s, channel_id = make_channel(shared_db)
-    job = jobs_service.enqueue(s, "scan", channel_id=channel_id, payload={"mode": "new"}); s.commit()
+    jobs_service.enqueue(s, "scan", channel_id=channel_id, payload={"mode": "new"}); s.commit()
     assert worker.process_one(); s.expire_all()
     assert abs((s.get(Channel, channel_id).next_sync_at - datetime.utcnow()) - timedelta(hours=24)) < timedelta(minutes=1)
